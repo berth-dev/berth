@@ -1,11 +1,23 @@
 {
   "name": "@berthdev/berth",
-  "version": "0.1.0-dev",
-  "description": "npm wrapper for the berth CLI binary",
+  "version": "0.1.0",
+  "description": "AI-powered code generation with quality guarantees",
   "bin": {
-    "berth": "./bin/berth.js"
+    "berth": "bin/berth.js"
   },
   "scripts": {
     "postinstall": "node install.js"
+  },
+  "optionalDependencies": {
+    "@berthdev/berth-darwin-arm64": "0.1.0",
+    "@berthdev/berth-darwin-x64": "0.1.0",
+    "@berthdev/berth-linux-x64": "0.1.0",
+    "@berthdev/berth-linux-arm64": "0.1.0",
+    "@berthdev/berth-win32-x64": "0.1.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/berthdev/berth"
   }
 }

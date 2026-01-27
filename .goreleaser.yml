@@ -1,13 +1,44 @@
-# GoReleaser configuration for cross-compilation and releases.
-# To be configured in a later phase.
-project_name: berth
+version: 2
+
 builds:
   - main: ./cmd/berth
     binary: berth
+    env:
+      - CGO_ENABLED=0
     goos:
-      - linux
       - darwin
+      - linux
       - windows
     goarch:
       - amd64
       - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X github.com/berth-dev/berth/internal/cli.version={{.Version}}
+
+archives:
+  - format: tar.gz
+    name_template: "berth-{{ .Os }}-{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: berthdev
+    name: berth
+  draft: false
+  prerelease: auto
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"

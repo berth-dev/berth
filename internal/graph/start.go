@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/berth-dev/berth/internal/config"
@@ -99,8 +98,8 @@ func StopMCP(projectRoot string) error {
 		return nil
 	}
 
-	// Send SIGTERM for graceful shutdown.
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
+	// Send interrupt signal for graceful shutdown.
+	if err := proc.Signal(os.Interrupt); err != nil {
 		// Process may already be dead.
 		_ = removePIDFile(projectRoot)
 		return nil
@@ -118,7 +117,7 @@ func StopMCP(projectRoot string) error {
 		// Process exited gracefully.
 	case <-time.After(stopTimeout):
 		// Force kill if still alive.
-		_ = proc.Signal(syscall.SIGKILL)
+		_ = proc.Kill()
 		<-done
 	}
 
@@ -173,11 +172,7 @@ func removePIDFile(projectRoot string) error {
 	return os.Remove(path)
 }
 
-// processAlive checks whether a process with the given PID is still running
-// by sending signal 0.
-func processAlive(pid int) bool {
-	return syscall.Kill(pid, 0) == nil
-}
+// processAlive is implemented in start_unix.go and start_windows.go.
 
 // countSourceFiles counts the number of source files under dir that match
 // known source code extensions. Used for the auto-enable heuristic.
