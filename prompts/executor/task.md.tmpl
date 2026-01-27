@@ -1,1 +1,25 @@
-<!-- Per-bead task prompt template. To be implemented in Phase 3. -->
+## Bead: {{.Title}}
+ID: {{.ID}} | Priority: {{.Priority}}
+
+## Description
+{{.Description}}
+
+## Files to Modify
+{{range .Files}}- {{.}}
+{{end}}
+
+## Verification
+{{.Verify}}
+
+## Done When
+{{.Done}}
+
+## Dependencies Completed
+{{range .CompletedDeps}}- {{.Title}}: {{.Summary}}
+{{end}}
+
+## Relevant Patterns
+{{.RelevantPatterns}}
+
+## Locked Decisions
+{{.LockedDecisions}}

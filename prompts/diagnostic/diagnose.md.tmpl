@@ -1,1 +1,30 @@
-<!-- Failure diagnosis prompt template. To be implemented in Phase 3. -->
+## Diagnostic: {{.Title}}
+ID: {{.ID}}
+
+This bead has failed 3 times. Analyze the errors and identify the root cause.
+
+## Bead Description
+{{.Description}}
+
+## Attempt 1 Error
+{{.Error1}}
+
+## Attempt 2 Error
+{{.Error2}}
+
+## Attempt 3 Error
+{{.Error3}}
+
+## Your Task
+1. Identify the common pattern across all 3 failures
+2. Determine the root cause
+3. Provide specific instructions that would fix the issue
+4. Note any misconceptions the executor had
+
+Output format (JSON):
+{
+  "rootCause": "What's actually wrong",
+  "fix": "Specific instructions to fix it",
+  "misconceptions": ["Things the executor got wrong"],
+  "additionalContext": "Any extra context needed"
+}
