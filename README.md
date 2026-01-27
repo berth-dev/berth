@@ -1,6 +1,6 @@
-# Berth
+# Berth - plan, execute, verify
 
-**One command. Fully built features. No babysitting.**
+**One command. Fully built features. Ship your code.**
 
 Berth is a Go CLI tool that orchestrates autonomous AI coding workflows using Claude Code. It combines GSD's structured planning, Ralph's fresh-context execution, Beads' git-backed task memory, and a Knowledge Graph MCP for deep code understanding -- no other workflow tool has all four.
 
