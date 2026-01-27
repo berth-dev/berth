@@ -6,7 +6,7 @@ Go CLI that orchestrates Claude Code for complex tasks using a bead-based workfl
 
 - Go 1.23+, Cobra CLI framework
 - Node.js Knowledge Graph MCP server (ts-morph + SQLite)
-- Module path: `github.com/berthdev/berth`
+- Module path: `github.com/berth-dev/berth`
 
 ## Directory Structure
 
