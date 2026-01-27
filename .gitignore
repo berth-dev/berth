@@ -3,8 +3,9 @@ RESEARCH.md
 sunny-tickling-penguin.md
 .claude-dev/
 
-# Go binary
+# Go binary and build output
 /berth
+/dist/
 *.exe
 *.dll
 *.so
@@ -12,6 +13,7 @@ sunny-tickling-penguin.md
 
 # Node.js
 node_modules/
+npm/.tmp-install/
 
 # TypeScript build output
 tools/code-graph/dist/
