@@ -46,7 +46,7 @@ golangci-lint run                # Lint
 ## Git
 
 - Commit format: `<type>(<scope>): <description>`
-- Types: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `chore`
+- Types: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `ci`, `build`, `style`, `chore`, `revert`
 - Subject: imperative mood, lowercase, no period, max 50 chars
 - Body: only when the *why* isn't obvious from the subject
 - One logical change per commit

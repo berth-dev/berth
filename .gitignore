@@ -2,3 +2,37 @@ workflow-research/
 RESEARCH.md
 sunny-tickling-penguin.md
 .claude-dev/
+
+# Go binary
+/berth
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Node.js
+node_modules/
+
+# TypeScript build output
+tools/code-graph/dist/
+
+# Runtime state
+.berth/
+.beads/
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~

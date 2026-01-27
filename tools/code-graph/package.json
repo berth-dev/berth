@@ -1,0 +1,10 @@
+{
+  "name": "@berthdev/code-graph",
+  "version": "0.1.0-dev",
+  "description": "Knowledge Graph MCP server for berth",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  }
+}

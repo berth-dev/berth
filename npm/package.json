@@ -1,0 +1,11 @@
+{
+  "name": "@berthdev/berth",
+  "version": "0.1.0-dev",
+  "description": "npm wrapper for the berth CLI binary",
+  "bin": {
+    "berth": "./bin/berth.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  }
+}

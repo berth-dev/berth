@@ -1,0 +1,13 @@
+# GoReleaser configuration for cross-compilation and releases.
+# To be configured in a later phase.
+project_name: berth
+builds:
+  - main: ./cmd/berth
+    binary: berth
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
