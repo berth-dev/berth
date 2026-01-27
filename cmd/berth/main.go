@@ -1,8 +1,8 @@
 // Berth CLI entry point.
 package main
 
-import "fmt"
+import "github.com/berth-dev/berth/internal/cli"
 
 func main() {
-	fmt.Println("berth v0.1.0-dev")
+	cli.Execute()
 }

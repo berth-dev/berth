@@ -28,9 +28,8 @@ const (
 // RunExecute is the main execution entry point. It creates a feature branch,
 // starts the KG MCP server, and processes beads one at a time through the
 // retry loop until all beads are completed, stuck, or skipped.
-func RunExecute(cfg config.Config, projectRoot string, runDir string) error {
+func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName string) error {
 	// 1. Create a git branch for this execution run.
-	branchName := cfg.Execution.BranchPrefix + cfg.Project.Name
 	if err := git.CreateBranch(branchName); err != nil {
 		// Branch may already exist; try switching to it.
 		if switchErr := git.SwitchBranch(branchName); switchErr != nil {
