@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/berth-dev/berth/internal/cleanup"
 	"github.com/berth-dev/berth/internal/config"
 	"github.com/berth-dev/berth/internal/detect"
 	"github.com/berth-dev/berth/internal/execute"
@@ -91,6 +92,17 @@ func runRun(cmd *cobra.Command, args []string) error {
 	runDir := filepath.Join(".berth", "runs", timestamp)
 	if mkErr := os.MkdirAll(runDir, 0755); mkErr != nil {
 		return fmt.Errorf("creating run directory: %w", mkErr)
+	}
+
+	// Auto-prune old run directories.
+	if cfg.Cleanup.MaxAgeDays > 0 {
+		runsDir := filepath.Join(".berth", "runs")
+		pruned, pruneErr := cleanup.PruneByAge(runsDir, cfg.Cleanup.MaxAgeDays, false)
+		if pruneErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: cleanup failed: %v\n", pruneErr)
+		} else if len(pruned) > 0 {
+			fmt.Fprintf(os.Stderr, "Cleaned up %d old run(s)\n", len(pruned))
+		}
 	}
 
 	// Determine branch name for execute phase.

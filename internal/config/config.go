@@ -18,6 +18,7 @@ type Config struct {
 	VerifyPipeline []string        `yaml:"verify_pipeline"`
 	KnowledgeGraph KGConfig        `yaml:"knowledge_graph"`
 	Beads          BeadsConfig     `yaml:"beads"`
+	Cleanup        CleanupConfig   `yaml:"cleanup"`
 }
 
 // ProjectConfig holds project metadata detected or supplied during init.
@@ -49,6 +50,11 @@ type KGConfig struct {
 // BeadsConfig holds configuration for the beads subsystem.
 type BeadsConfig struct {
 	Prefix string `yaml:"prefix"` // e.g. "bt"
+}
+
+// CleanupConfig controls automatic cleanup of old run directories.
+type CleanupConfig struct {
+	MaxAgeDays int `yaml:"max_age_days"` // 0 = disable auto-prune
 }
 
 // configFileName is the path relative to the project root.
@@ -115,6 +121,9 @@ func DefaultConfig() *Config {
 		},
 		Beads: BeadsConfig{
 			Prefix: "bt",
+		},
+		Cleanup: CleanupConfig{
+			MaxAgeDays: 30,
 		},
 	}
 }
