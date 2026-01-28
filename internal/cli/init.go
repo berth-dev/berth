@@ -64,6 +64,14 @@ func runInit(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to set up .gitignore: %v\n", err)
 	}
 
+	// Ensure a git repo exists before beads init (bd --stealth needs .git/).
+	if err := git.EnsureRepo(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to ensure git repo: %v\n", err)
+	}
+	if err := git.EnsureInitialCommit(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to create initial commit: %v\n", err)
+	}
+
 	// Detect brownfield vs greenfield.
 	brownfield := detect.HasExistingCode(dir)
 

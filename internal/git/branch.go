@@ -65,6 +65,22 @@ func CurrentBranch() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// EnsureRepo ensures a git repository exists in the current directory.
+// Runs `git init` if .git/ is not present. This is a no-op if already a repo.
+func EnsureRepo() error {
+	if err := ensureGit(); err != nil {
+		return err
+	}
+	cmd := exec.Command("git", "rev-parse", "--git-dir")
+	if err := cmd.Run(); err != nil {
+		initCmd := exec.Command("git", "init")
+		if out, initErr := initCmd.CombinedOutput(); initErr != nil {
+			return fmt.Errorf("git init: %s: %w", strings.TrimSpace(string(out)), initErr)
+		}
+	}
+	return nil
+}
+
 // EnsureInitialCommit creates an empty initial commit if the repo has none.
 // This is needed because git cannot create branches in a repo with no commits.
 func EnsureInitialCommit() error {
