@@ -197,7 +197,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	// Phase 3: EXECUTE
 	fmt.Println("Phase 3 EXECUTE: running beads...")
-	if execErr := execute.RunExecute(*cfg, projectRoot, runDir, branchName); execErr != nil {
+	if execErr := execute.RunExecute(*cfg, projectRoot, runDir, branchName, Verbose()); execErr != nil {
 		fmt.Fprintf(os.Stderr, "Execute phase error: %v\n", execErr)
 		// Continue to report phase even if execute had errors.
 	}

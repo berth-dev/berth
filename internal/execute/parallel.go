@@ -54,7 +54,7 @@ func countRootBeads(allBeads []beads.Bead) int {
 // coordinator server, worktree manager, merge queue, and scheduler, then
 // runs all beads concurrently up to MaxParallel. prefetchedBeads is the
 // bead list already fetched by RunExecute to avoid a redundant bd list call.
-func RunExecuteParallel(cfg config.Config, projectRoot string, runDir string, branchName string, prefetchedBeads []beads.Bead) error {
+func RunExecuteParallel(cfg config.Config, projectRoot string, runDir string, branchName string, prefetchedBeads []beads.Bead, verbose bool) error {
 	// 1. Create a git branch for this execution run.
 	if err := git.EnsureInitialCommit(); err != nil {
 		return fmt.Errorf("ensuring initial commit: %w", err)
@@ -131,7 +131,7 @@ func RunExecuteParallel(cfg config.Config, projectRoot string, runDir string, br
 	scheduler := NewScheduler(
 		cfg, projectRoot, allBeads, pool,
 		worktrees, mergeQueue, coordServer,
-		kgClient, logger, systemPrompt,
+		kgClient, logger, systemPrompt, verbose,
 	)
 
 	if err := scheduler.Run(); err != nil {

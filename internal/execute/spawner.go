@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"time"
 
@@ -17,6 +19,7 @@ type SpawnClaudeOpts struct {
 	WorkDir       string // Override working directory (default: projectRoot)
 	MCPConfigPath string // Path to MCP config JSON for coordinator bridge
 	SystemPrompt  string // Override system prompt (default: prompts.ExecutorSystemPrompt)
+	Verbose       bool   // Stream Claude output to stdout/stderr in real-time
 }
 
 // SpawnClaude invokes the Claude CLI as a subprocess with the given system
@@ -43,8 +46,15 @@ func SpawnClaude(cfg config.Config, systemPrompt, taskPrompt string, projectRoot
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+
+	// In verbose mode, stream output to terminal while also capturing it.
+	if opts != nil && opts.Verbose {
+		cmd.Stdout = io.MultiWriter(&stdout, os.Stdout)
+		cmd.Stderr = io.MultiWriter(&stderr, os.Stderr)
+	} else {
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+	}
 
 	err := cmd.Run()
 	if err != nil {

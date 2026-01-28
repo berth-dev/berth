@@ -34,6 +34,11 @@ func Execute() {
 	}
 }
 
+// Verbose returns true if --verbose flag is set.
+func Verbose() bool {
+	return verbose
+}
+
 func init() {
 	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "Stream Claude output instead of progress bar")
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "Pass --mcp-debug to Claude processes for MCP troubleshooting")

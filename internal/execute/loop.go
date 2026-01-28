@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/berth-dev/berth/internal/beads"
 	"github.com/berth-dev/berth/internal/config"
@@ -29,7 +30,7 @@ const (
 // starts the KG MCP server, and processes beads one at a time through the
 // retry loop until all beads are completed, stuck, or skipped.
 // If parallel mode is active, delegates to RunExecuteParallel.
-func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName string) error {
+func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName string, verbose bool) error {
 	// Check if parallel execution is appropriate.
 	allBeadsList, err := beads.List()
 	if err != nil {
@@ -37,7 +38,7 @@ func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName
 	}
 	if ShouldRunParallel(cfg, allBeadsList) {
 		fmt.Println("Parallel mode enabled")
-		return RunExecuteParallel(cfg, projectRoot, runDir, branchName, allBeadsList)
+		return RunExecuteParallel(cfg, projectRoot, runDir, branchName, allBeadsList, verbose)
 	}
 
 	// 1. Create a git branch for this execution run.
@@ -154,7 +155,8 @@ func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName
 
 		// Execute with retry logic.
 		// RetryBead is defined in retry.go (same package, implemented by another agent).
-		passed, retryErr := RetryBead(cfg, task, graphData, projectRoot, logger, kgClient, nil)
+		opts := &SpawnClaudeOpts{Verbose: verbose}
+		passed, retryErr := RetryBead(cfg, task, graphData, projectRoot, logger, kgClient, opts)
 		if retryErr != nil {
 			fmt.Fprintf(os.Stderr, "Error during bead %s execution: %v\n", task.ID, retryErr)
 		}
@@ -264,15 +266,27 @@ func onBeadSuccess(task *beads.Bead, kgClient *graph.Client, projectRoot string,
 	return nil
 }
 
-// readSystemPrompt reads the system prompt from .berth/CLAUDE.md.
-// Returns the file content or an error if the file cannot be read.
+// readSystemPrompt reads system prompts and combines them.
+// Order: root CLAUDE.md (project conventions) + .berth/CLAUDE.md (executor context).
+// Returns error only if .berth/CLAUDE.md cannot be read.
 func readSystemPrompt(projectRoot string) (string, error) {
-	path := filepath.Join(projectRoot, ".berth", "CLAUDE.md")
-	data, err := os.ReadFile(path)
+	var parts []string
+
+	// 1. Read root CLAUDE.md if it exists (project conventions).
+	rootPath := filepath.Join(projectRoot, "CLAUDE.md")
+	if rootData, err := os.ReadFile(rootPath); err == nil {
+		parts = append(parts, "# Project Conventions\n\n"+string(rootData))
+	}
+
+	// 2. Read .berth/CLAUDE.md (executor context).
+	berthPath := filepath.Join(projectRoot, ".berth", "CLAUDE.md")
+	berthData, err := os.ReadFile(berthPath)
 	if err != nil {
 		return "", fmt.Errorf("reading system prompt: %w", err)
 	}
-	return string(data), nil
+	parts = append(parts, string(berthData))
+
+	return strings.Join(parts, "\n\n"), nil
 }
 
 // preEmbedGraphData queries the KG client for data about the bead's files

@@ -138,7 +138,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 
 	// Resume execution.
 	fmt.Println("\nResuming execution...")
-	if execErr := execute.RunExecute(*cfg, projectRoot, runDir, branchName); execErr != nil {
+	if execErr := execute.RunExecute(*cfg, projectRoot, runDir, branchName, Verbose()); execErr != nil {
 		fmt.Fprintf(os.Stderr, "Execute phase error: %v\n", execErr)
 		// Continue to report phase.
 	}

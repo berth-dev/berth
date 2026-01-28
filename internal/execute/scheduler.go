@@ -42,6 +42,7 @@ type Scheduler struct {
 	kgClient     *graph.Client
 	logger       *log.Logger
 	systemPrompt string
+	verbose      bool
 	wg           sync.WaitGroup
 }
 
@@ -58,6 +59,7 @@ func NewScheduler(
 	kgClient *graph.Client,
 	logger *log.Logger,
 	systemPrompt string,
+	verbose bool,
 ) *Scheduler {
 	nodes := make(map[string]*BeadNode, len(allBeads))
 
@@ -105,6 +107,7 @@ func NewScheduler(
 		kgClient:     kgClient,
 		logger:       logger,
 		systemPrompt: systemPrompt,
+		verbose:      verbose,
 	}
 }
 
@@ -265,6 +268,7 @@ func (s *Scheduler) executeWorker(node *BeadNode) {
 		WorkDir:       worktreePath,
 		MCPConfigPath: mcpConfigPath,
 		SystemPrompt:  s.systemPrompt + "\n\n" + prompts.ParallelSystemPrompt,
+		Verbose:       s.verbose,
 	}
 
 	// Run retry loop.
