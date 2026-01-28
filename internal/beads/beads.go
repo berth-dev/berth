@@ -99,6 +99,45 @@ func Ready() (*Bead, error) {
 	return &bead, nil
 }
 
+// ReadyAll returns all unblocked beads ready for execution.
+// Returns nil, nil if no beads are ready (all done or all blocked).
+func ReadyAll() ([]*Bead, error) {
+	if err := ensureBD(); err != nil {
+		return nil, err
+	}
+
+	cmd := exec.Command("bd", "ready", "--json")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("bd ready failed: %w: %s", err, output)
+	}
+
+	trimmed := strings.TrimSpace(string(output))
+	if trimmed == "" || trimmed == "null" || trimmed == "[]" {
+		return nil, nil
+	}
+
+	// bd ready --json returns an array; try array first, then single object.
+	var beadList []Bead
+	if err := json.Unmarshal([]byte(trimmed), &beadList); err == nil {
+		if len(beadList) == 0 {
+			return nil, nil
+		}
+		result := make([]*Bead, len(beadList))
+		for i := range beadList {
+			result[i] = &beadList[i]
+		}
+		return result, nil
+	}
+
+	var bead Bead
+	if err := json.Unmarshal([]byte(trimmed), &bead); err != nil {
+		return nil, fmt.Errorf("bd ready: failed to parse JSON: %w: %s", err, trimmed)
+	}
+
+	return []*Bead{&bead}, nil
+}
+
 // Close marks a bead as completed with a reason.
 func Close(id, reason string) error {
 	if err := ensureBD(); err != nil {
