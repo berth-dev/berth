@@ -24,29 +24,42 @@ const (
 	EventTaskRetry          = "task_retry"
 	EventTaskCompleted      = "task_completed"
 	EventRunComplete        = "run_complete"
+	EventWorkerStarted      = "worker_started"
+	EventWorkerCompleted    = "worker_completed"
+	EventMergeStarted       = "merge_started"
+	EventMergeCompleted     = "merge_completed"
+	EventMergeFailed        = "merge_failed"
+	EventReconcileStarted   = "reconcile_started"
+	EventReconcileCompleted = "reconcile_completed"
+	EventReconcileFailed    = "reconcile_failed"
 )
 
 // LogEvent represents a single structured event written to the log.
 type LogEvent struct {
-	Time         time.Time              `json:"time"`
-	Event        string                 `json:"event"`
-	BeadID       string                 `json:"bead,omitempty"`
-	Title        string                 `json:"title,omitempty"`
-	Description  string                 `json:"description,omitempty"`
-	Branch       string                 `json:"branch,omitempty"`
-	Beads        int                    `json:"beads,omitempty"`
-	Commits      []string               `json:"commits,omitempty"`
-	Reason       string                 `json:"reason,omitempty"`
-	Step         string                 `json:"step,omitempty"`
-	Error        string                 `json:"error,omitempty"`
-	Attempt      int                    `json:"attempt,omitempty"`
-	Completed    int                    `json:"completed,omitempty"`
-	Stuck        int                    `json:"stuck,omitempty"`
-	Total        int                    `json:"total,omitempty"`
-	Requirements string                 `json:"requirements,omitempty"`
-	DurationMs   int64                  `json:"duration_ms,omitempty"`
-	CostUSD      float64                `json:"cost_usd,omitempty"`
-	Data         map[string]interface{} `json:"data,omitempty"`
+	Time          time.Time              `json:"time"`
+	Event         string                 `json:"event"`
+	BeadID        string                 `json:"bead,omitempty"`
+	Title         string                 `json:"title,omitempty"`
+	Description   string                 `json:"description,omitempty"`
+	Branch        string                 `json:"branch,omitempty"`
+	Beads         int                    `json:"beads,omitempty"`
+	Commits       []string               `json:"commits,omitempty"`
+	Reason        string                 `json:"reason,omitempty"`
+	Step          string                 `json:"step,omitempty"`
+	Error         string                 `json:"error,omitempty"`
+	Attempt       int                    `json:"attempt,omitempty"`
+	Completed     int                    `json:"completed,omitempty"`
+	Stuck         int                    `json:"stuck,omitempty"`
+	Total         int                    `json:"total,omitempty"`
+	Requirements  string                 `json:"requirements,omitempty"`
+	DurationMs    int64                  `json:"duration_ms,omitempty"`
+	CostUSD       float64                `json:"cost_usd,omitempty"`
+	Data          map[string]interface{} `json:"data,omitempty"`
+	WorkerID      string                 `json:"worker_id,omitempty"`
+	WorktreePath  string                 `json:"worktree_path,omitempty"`
+	MergeFrom     string                 `json:"merge_from,omitempty"`
+	MergeTo       string                 `json:"merge_to,omitempty"`
+	ConflictFiles []string               `json:"conflict_files,omitempty"`
 }
 
 // Logger writes append-only JSONL events to a log file.
