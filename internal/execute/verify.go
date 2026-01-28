@@ -22,7 +22,8 @@ type VerifyResult struct {
 // RunVerification executes the verification pipeline commands in order.
 // It combines the default pipeline from config.VerifyPipeline with any
 // per-bead verify_extra commands. Execution stops on the first failure.
-func RunVerification(cfg config.Config, bead *beads.Bead) (*VerifyResult, error) {
+// Pass an empty workDir to run in the current directory.
+func RunVerification(cfg config.Config, bead *beads.Bead, workDir string) (*VerifyResult, error) {
 	pipeline := buildPipeline(cfg, bead)
 	if len(pipeline) == 0 {
 		return &VerifyResult{
@@ -34,7 +35,7 @@ func RunVerification(cfg config.Config, bead *beads.Bead) (*VerifyResult, error)
 	var allOutput strings.Builder
 
 	for _, step := range pipeline {
-		stepOutput, err := runStep(step)
+		stepOutput, err := runStep(step, workDir)
 
 		allOutput.WriteString(fmt.Sprintf("=== %s ===\n", step))
 		allOutput.WriteString(stepOutput)
@@ -72,9 +73,13 @@ func buildPipeline(cfg config.Config, bead *beads.Bead) []string {
 
 // runStep executes a single shell command and returns the combined
 // stdout+stderr output. Returns a non-nil error if the command exits
-// with a non-zero status.
-func runStep(command string) (string, error) {
+// with a non-zero status. If workDir is non-empty, the command runs
+// in that directory.
+func runStep(command string, workDir string) (string, error) {
 	cmd := exec.Command("sh", "-c", command)
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
 
 	var buf bytes.Buffer
 	cmd.Stdout = &buf

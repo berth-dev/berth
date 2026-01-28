@@ -68,7 +68,7 @@ func HandleStuck(
 			}
 
 			// Check if verification passes after rescue.
-			result, err := RunVerification(cfg, bead)
+			result, err := RunVerification(cfg, bead, "")
 			if err != nil {
 				fmt.Printf("  Post-rescue verification error: %v\n", err)
 				continue
@@ -165,7 +165,7 @@ func retryWithHint(
 	hintDiagnosis := fmt.Sprintf("User hint: %s", hint)
 	taskPrompt := BuildExecutorPrompt(bead, 5, &hintDiagnosis, graphData, learnings)
 
-	output, err := SpawnClaude(cfg, systemPrompt, taskPrompt, projectRoot)
+	output, err := SpawnClaude(cfg, systemPrompt, taskPrompt, projectRoot, nil)
 	if err != nil {
 		return false, fmt.Errorf("spawning claude with hint: %w", err)
 	}
@@ -174,7 +174,7 @@ func retryWithHint(
 		return false, fmt.Errorf("claude returned error: %s", output.Result)
 	}
 
-	result, err := RunVerification(cfg, bead)
+	result, err := RunVerification(cfg, bead, "")
 	if err != nil {
 		return false, fmt.Errorf("verification after hint: %w", err)
 	}

@@ -11,10 +11,19 @@ import (
 	"github.com/berth-dev/berth/internal/config"
 )
 
+// SpawnClaudeOpts holds optional overrides for Claude subprocess invocation.
+// Pass nil for default behavior (backward compatible).
+type SpawnClaudeOpts struct {
+	WorkDir       string // Override working directory (default: projectRoot)
+	MCPConfigPath string // Path to MCP config JSON for coordinator bridge
+	SystemPrompt  string // Override system prompt (default: prompts.ExecutorSystemPrompt)
+}
+
 // SpawnClaude invokes the Claude CLI as a subprocess with the given system
 // and task prompts, waits for completion, and returns the parsed output.
 // It enforces cfg.Execution.TimeoutPerBead as a hard timeout.
-func SpawnClaude(cfg config.Config, systemPrompt, taskPrompt string, projectRoot string) (*ClaudeOutput, error) {
+// Pass nil for opts to use default behavior.
+func SpawnClaude(cfg config.Config, systemPrompt, taskPrompt string, projectRoot string, opts *SpawnClaudeOpts) (*ClaudeOutput, error) {
 	timeout := time.Duration(cfg.Execution.TimeoutPerBead) * time.Second
 	if timeout <= 0 {
 		timeout = 10 * time.Minute
@@ -23,10 +32,14 @@ func SpawnClaude(cfg config.Config, systemPrompt, taskPrompt string, projectRoot
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	args := buildClaudeArgs(cfg, systemPrompt, taskPrompt)
+	args := buildClaudeArgs(cfg, systemPrompt, taskPrompt, opts)
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
-	cmd.Dir = projectRoot
+	if opts != nil && opts.WorkDir != "" {
+		cmd.Dir = opts.WorkDir
+	} else {
+		cmd.Dir = projectRoot
+	}
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -51,7 +64,7 @@ func SpawnClaude(cfg config.Config, systemPrompt, taskPrompt string, projectRoot
 }
 
 // buildClaudeArgs constructs the CLI argument slice for a Claude invocation.
-func buildClaudeArgs(cfg config.Config, systemPrompt, taskPrompt string) []string {
+func buildClaudeArgs(cfg config.Config, systemPrompt, taskPrompt string, opts *SpawnClaudeOpts) []string {
 	args := []string{
 		"-p", taskPrompt,
 		"--append-system-prompt", systemPrompt,
@@ -59,6 +72,10 @@ func buildClaudeArgs(cfg config.Config, systemPrompt, taskPrompt string) []strin
 		"--output-format", "json",
 		"--dangerously-skip-permissions",
 		"--model", "opus",
+	}
+
+	if opts != nil && opts.MCPConfigPath != "" {
+		args = append(args, "--mcp-config", opts.MCPConfigPath)
 	}
 
 	if cfg.KnowledgeGraph.MCPDebug {

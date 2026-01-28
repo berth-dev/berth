@@ -32,9 +32,13 @@ func RetryBead(
 	projectRoot string,
 	logger *log.Logger,
 	kgClient *graph.Client,
+	opts *SpawnClaudeOpts,
 ) (bool, error) {
 	learnings := berthcontext.ReadLearnings(projectRoot)
 	systemPrompt := prompts.ExecutorSystemPrompt
+	if opts != nil && opts.SystemPrompt != "" {
+		systemPrompt = opts.SystemPrompt
+	}
 
 	var collectedErrors []string
 
@@ -42,7 +46,7 @@ func RetryBead(
 	for attempt := 1; attempt <= maxBlindRetries; attempt++ {
 		taskPrompt := BuildExecutorPrompt(bead, attempt, nil, graphData, learnings)
 
-		output, err := SpawnClaude(cfg, systemPrompt, taskPrompt, projectRoot)
+		output, err := SpawnClaude(cfg, systemPrompt, taskPrompt, projectRoot, opts)
 		if err != nil {
 			collectedErrors = append(collectedErrors, fmt.Sprintf("spawn error (attempt %d): %v", attempt, err))
 			logRetry(logger, bead, attempt, fmt.Sprintf("spawn error: %v", err))
@@ -55,7 +59,11 @@ func RetryBead(
 			continue
 		}
 
-		result, err := RunVerification(cfg, bead)
+		workDir := ""
+		if opts != nil {
+			workDir = opts.WorkDir
+		}
+		result, err := RunVerification(cfg, bead, workDir)
 		if err != nil {
 			collectedErrors = append(collectedErrors, fmt.Sprintf("verify error (attempt %d): %v", attempt, err))
 			logRetry(logger, bead, attempt, fmt.Sprintf("verify error: %v", err))
@@ -83,7 +91,7 @@ func RetryBead(
 
 	taskPrompt := BuildExecutorPrompt(bead, maxBlindRetries+1, &diagnosis, graphData, learnings)
 
-	output, err := SpawnClaude(cfg, systemPrompt, taskPrompt, projectRoot)
+	output, err := SpawnClaude(cfg, systemPrompt, taskPrompt, projectRoot, opts)
 	if err != nil {
 		return false, fmt.Errorf("diagnostic spawn failed for bead %s: %w", bead.ID, err)
 	}
@@ -92,7 +100,11 @@ func RetryBead(
 		return false, nil
 	}
 
-	result, err := RunVerification(cfg, bead)
+	workDir := ""
+	if opts != nil {
+		workDir = opts.WorkDir
+	}
+	result, err := RunVerification(cfg, bead, workDir)
 	if err != nil {
 		return false, fmt.Errorf("post-diagnostic verify failed for bead %s: %w", bead.ID, err)
 	}
