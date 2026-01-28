@@ -108,3 +108,68 @@ func BranchExists(name string) bool {
 	cmd := exec.Command("git", "rev-parse", "--verify", name)
 	return cmd.Run() == nil
 }
+
+// CreateWorktree creates a git worktree at path with a new branch based on baseBranch.
+// Shells out to: git worktree add -b <branchName> <path> <baseBranch>
+func CreateWorktree(path, branchName, baseBranch string) error {
+	if err := ensureGit(); err != nil {
+		return err
+	}
+	cmd := exec.Command("git", "worktree", "add", "-b", branchName, path, baseBranch)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// RemoveWorktree removes a git worktree at the given path.
+// Shells out to: git worktree remove --force <path>
+func RemoveWorktree(path string) error {
+	if err := ensureGit(); err != nil {
+		return err
+	}
+	cmd := exec.Command("git", "worktree", "remove", "--force", path)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git worktree remove: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// MergeWorktreeBranch merges the named branch into the current branch with a merge commit.
+// Shells out to: git merge --no-ff <branchName> -m <commitMsg>
+func MergeWorktreeBranch(branchName, commitMsg string) error {
+	if err := ensureGit(); err != nil {
+		return err
+	}
+	cmd := exec.Command("git", "merge", "--no-ff", branchName, "-m", commitMsg)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git merge: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// AbortMerge aborts an in-progress merge.
+// Shells out to: git merge --abort
+func AbortMerge() error {
+	if err := ensureGit(); err != nil {
+		return err
+	}
+	cmd := exec.Command("git", "merge", "--abort")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git merge --abort: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// DeleteBranch deletes a local branch.
+// Shells out to: git branch -D <name>
+func DeleteBranch(name string) error {
+	if err := ensureGit(); err != nil {
+		return err
+	}
+	cmd := exec.Command("git", "branch", "-D", name)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git branch -D %s: %s: %w", name, strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
