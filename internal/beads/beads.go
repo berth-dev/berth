@@ -48,14 +48,19 @@ func Create(title, description string) (string, error) {
 		return "", fmt.Errorf("bd create failed: %w: %s", err, output)
 	}
 
-	// Parse the bead ID from output like "Created bead bt-a1b2c"
-	line := strings.TrimSpace(string(output))
-	parts := strings.Fields(line)
-	if len(parts) < 3 {
-		return "", fmt.Errorf("bd create: unexpected output format: %s", line)
+	// Parse the bead ID from output like "✓ Created issue: testproject-20g"
+	// The ID is on the first line after "Created issue:"
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "Created issue:") {
+			parts := strings.SplitN(line, "Created issue:", 2)
+			if len(parts) == 2 {
+				return strings.TrimSpace(parts[1]), nil
+			}
+		}
 	}
-	id := parts[len(parts)-1]
-	return id, nil
+	return "", fmt.Errorf("bd create: could not parse bead ID from output: %s", string(output))
 }
 
 // Ready returns the next unblocked bead ready for execution.
@@ -74,6 +79,15 @@ func Ready() (*Bead, error) {
 	trimmed := strings.TrimSpace(string(output))
 	if trimmed == "" || trimmed == "null" || trimmed == "[]" {
 		return nil, nil
+	}
+
+	// bd ready --json returns an array; try array first, then single object
+	var beadList []Bead
+	if err := json.Unmarshal([]byte(trimmed), &beadList); err == nil {
+		if len(beadList) == 0 {
+			return nil, nil
+		}
+		return &beadList[0], nil
 	}
 
 	var bead Bead
@@ -129,13 +143,26 @@ func AddDependency(child, parent string) error {
 	return nil
 }
 
-// List returns all beads in the current project.
+// List returns all open/in-progress beads in the current project.
 func List() ([]Bead, error) {
+	return listBeads(false)
+}
+
+// ListAll returns all beads including closed ones.
+func ListAll() ([]Bead, error) {
+	return listBeads(true)
+}
+
+func listBeads(includeAll bool) ([]Bead, error) {
 	if err := ensureBD(); err != nil {
 		return nil, err
 	}
 
-	cmd := exec.Command("bd", "list", "--json")
+	args := []string{"list", "--json", "--limit", "0"}
+	if includeAll {
+		args = append(args, "--all")
+	}
+	cmd := exec.Command("bd", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("bd list failed: %w: %s", err, output)
@@ -155,12 +182,14 @@ func List() ([]Bead, error) {
 }
 
 // Init initializes the beads system in the current directory.
+// Uses --stealth mode so beads files are excluded via .git/info/exclude
+// instead of polluting the user's working tree with AGENTS.md and .gitattributes.
 func Init() error {
 	if err := ensureBD(); err != nil {
 		return err
 	}
 
-	cmd := exec.Command("bd", "init")
+	cmd := exec.Command("bd", "init", "--stealth", "--skip-hooks")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("bd init failed: %w: %s", err, output)

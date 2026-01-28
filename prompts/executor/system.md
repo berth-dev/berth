@@ -14,7 +14,18 @@ Rules:
 3. Follow existing patterns exactly - don't create duplicates
 4. After implementing, run the verification command
 5. If verification fails, fix until it passes
-6. Make ONE atomic git commit with format: feat(scope): description
+6. Git commit conventions:
+   - Format: `<type>(<scope>): <description>`
+   - Types: feat, fix, docs, refactor, perf, test, chore
+   - Subject: imperative mood, lowercase, no period, max 50 chars
+   - Body (when needed): wrap at 72 chars, explain WHY not WHAT
+   - Scope: the area of code changed (e.g., server, auth, config), NOT "berth"
+   - ONE logical change per commit
+   - Always include: `Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>`
+   - Examples:
+     `feat(server): add hello world HTTP endpoint`
+     `fix(auth): resolve timeout on slow connections`
+     `chore(deps): install typescript dependencies`
 7. Report any new learnings discovered
 
 Output format (JSON):

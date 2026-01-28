@@ -65,6 +65,24 @@ func CurrentBranch() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// EnsureInitialCommit creates an empty initial commit if the repo has none.
+// This is needed because git cannot create branches in a repo with no commits.
+func EnsureInitialCommit() error {
+	if err := ensureGit(); err != nil {
+		return err
+	}
+	// Check if HEAD exists (i.e., there is at least one commit).
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	if err := cmd.Run(); err != nil {
+		// No commits — create an empty initial commit.
+		commitCmd := exec.Command("git", "commit", "--allow-empty", "-m", "chore: initialize repository")
+		if out, commitErr := commitCmd.CombinedOutput(); commitErr != nil {
+			return fmt.Errorf("creating initial commit: %s: %w", strings.TrimSpace(string(out)), commitErr)
+		}
+	}
+	return nil
+}
+
 // BranchExists checks whether a branch with the given name exists.
 // Shells out to: git rev-parse --verify <name>
 func BranchExists(name string) bool {

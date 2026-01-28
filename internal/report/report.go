@@ -41,8 +41,8 @@ func GenerateReport(cfg config.Config, projectRoot string, runDir string) (*Repo
 		Feature: cfg.Project.Name,
 	}
 
-	// Collect bead statistics.
-	allBeads, err := beads.List()
+	// Collect bead statistics (include closed beads).
+	allBeads, err := beads.ListAll()
 	if err != nil {
 		// Non-fatal: we proceed with zero counts.
 		allBeads = nil
@@ -50,11 +50,11 @@ func GenerateReport(cfg config.Config, projectRoot string, runDir string) (*Repo
 	r.TotalBeads = len(allBeads)
 	for _, b := range allBeads {
 		switch b.Status {
-		case "done":
+		case "done", "closed":
 			r.Completed++
 		case "stuck":
 			r.Stuck++
-		case "open":
+		case "open", "in_progress":
 			r.Skipped++
 		}
 	}

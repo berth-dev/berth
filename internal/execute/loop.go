@@ -30,6 +30,11 @@ const (
 // retry loop until all beads are completed, stuck, or skipped.
 func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName string) error {
 	// 1. Create a git branch for this execution run.
+	// If the repo has no commits, create an initial empty commit first
+	// so we have something to branch from.
+	if err := git.EnsureInitialCommit(); err != nil {
+		return fmt.Errorf("ensuring initial commit: %w", err)
+	}
 	if err := git.CreateBranch(branchName); err != nil {
 		// Branch may already exist; try switching to it.
 		if switchErr := git.SwitchBranch(branchName); switchErr != nil {
@@ -200,12 +205,21 @@ func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName
 	return nil
 }
 
-// onBeadSuccess handles post-success steps: commit, close bead, append learning,
+// onBeadSuccess handles post-success steps: close bead, append learning,
 // reindex changed files, and log completion.
+// Note: Claude already commits code changes during bead execution.
+// We only commit here if there are leftover unstaged changes (e.g., generated files
+// that Claude didn't stage). This avoids duplicate commits per bead.
 func onBeadSuccess(task *beads.Bead, kgClient *graph.Client, projectRoot string, logger *log.Logger, systemPrompt string) error {
-	// Commit changes for this bead.
-	if err := git.CommitBead(task.ID, task.Title); err != nil {
-		return fmt.Errorf("committing bead %s: %w", task.ID, err)
+	// Only commit if Claude left unstaged changes (rare).
+	// Claude's own commit is the primary one — we don't want to create
+	// a redundant "feat(berth):" wrapper commit.
+	has, _ := git.HasChanges()
+	if has {
+		if err := git.CommitBead(task.ID, task.Title); err != nil {
+			// Non-fatal: Claude's commit already captured the main work.
+			fmt.Fprintf(os.Stderr, "Warning: failed to commit leftover changes for bead %s: %v\n", task.ID, err)
+		}
 	}
 
 	// Close the bead.
