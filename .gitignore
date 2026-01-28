@@ -38,3 +38,10 @@ Thumbs.db
 .idea/
 *.swp
 *~
+
+# Added by berth init
+build/
+.berth/log.jsonl
+.berth/mcp.pid
+.berth/mcp.log
+.berth/runs/
