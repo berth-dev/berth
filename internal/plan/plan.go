@@ -39,7 +39,7 @@ type claudeJSONOutput struct {
 // RunPlan orchestrates the planning phase. It generates a plan prompt, spawns
 // Claude to produce a plan, parses the output, and runs an interactive approval
 // loop. Returns the approved plan or an error.
-func RunPlan(cfg config.Config, requirements *Requirements, graphData string, runDir string) (*Plan, error) {
+func RunPlan(cfg config.Config, requirements *Requirements, graphData string, runDir string, isGreenfield bool) (*Plan, error) {
 	stackInfo := detect.StackInfo{
 		Language:       cfg.Project.Language,
 		Framework:      cfg.Project.Framework,
@@ -52,7 +52,7 @@ func RunPlan(cfg config.Config, requirements *Requirements, graphData string, ru
 	reader := bufio.NewReader(os.Stdin)
 
 	for {
-		prompt := BuildPlanPrompt(requirements, stackInfo, graphData, learnings, feedback)
+		prompt := BuildPlanPrompt(requirements, stackInfo, graphData, learnings, feedback, isGreenfield)
 
 		fmt.Println("Generating plan with Claude...")
 		rawOutput, err := spawnClaude(prompt)

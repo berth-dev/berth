@@ -172,7 +172,8 @@ func runRun(cmd *cobra.Command, args []string) error {
 		Content: reqs.Content,
 	}
 
-	p, err := plan.RunPlan(*cfg, planReqs, "", runDir)
+	isGreenfield := !detect.HasExistingCode(projectRoot)
+	p, err := plan.RunPlan(*cfg, planReqs, "", runDir, isGreenfield)
 	if err != nil {
 		return fmt.Errorf("plan phase: %w", err)
 	}
@@ -180,7 +181,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Phase 2 PLAN: approved (%d beads)\n", len(p.Beads))
 
 	// Create beads from the plan.
-	if beadErr := plan.CreateBeads(p); beadErr != nil {
+	if beadErr := plan.CreateBeads(p, projectRoot); beadErr != nil {
 		return fmt.Errorf("creating beads: %w", beadErr)
 	}
 	fmt.Printf("Created %d beads\n\n", len(p.Beads))

@@ -4,7 +4,9 @@ ID: {{.ID}} | Priority: {{.Priority}}
 ## Description
 {{.Description}}
 
-## Files to Modify
+## Files to Create or Modify (MANDATORY paths)
+You MUST create/modify files at these EXACT paths. Do NOT change the directory structure.
+If a path says src/app/layout.tsx, create src/app/layout.tsx — not app/layout.tsx.
 {{range .Files}}- {{.}}
 {{end}}
 

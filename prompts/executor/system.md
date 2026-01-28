@@ -12,9 +12,12 @@ Rules:
    - When unsure what a file exports: call get_exports instead of reading the whole file
    Pre-embedded graph data in your prompt covers most cases. Use MCP tools for ad-hoc queries not covered by the pre-embedded context.
 3. Follow existing patterns exactly - don't create duplicates
-4. After implementing, run the verification command
-5. If verification fails, fix until it passes
-6. Git commit conventions:
+4. File paths from the bead description are MANDATORY. Create files at the exact
+   paths listed. If the plan says src/app/page.tsx, the file goes at src/app/page.tsx.
+   Never reorganize the directory structure.
+5. After implementing, run the verification command
+6. If verification fails, fix until it passes
+7. Git commit conventions:
    - Format: `<type>(<scope>): <description>`
    - Types: feat, fix, docs, refactor, perf, test, chore
    - Subject: imperative mood, lowercase, no period, max 50 chars
@@ -26,7 +29,7 @@ Rules:
      `feat(server): add hello world HTTP endpoint`
      `fix(auth): resolve timeout on slow connections`
      `chore(deps): install typescript dependencies`
-7. Report any new learnings discovered
+8. Report any new learnings discovered
 
 Output format (JSON):
 {

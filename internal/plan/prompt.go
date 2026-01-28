@@ -8,10 +8,75 @@ import (
 	"github.com/berth-dev/berth/internal/detect"
 )
 
+// scaffoldCmds maps framework names to their official scaffolding commands.
+// Empty string means no scaffolding tool is available.
+var scaffoldCmds = map[string]string{
+	"next":    "npx create-next-app@latest . --yes --ts --eslint --tailwind --app --src-dir --use-npm --disable-git",
+	"react":   "npx create-react-app . --template typescript",
+	"vue":     "npm create vue@latest . -- --typescript --jsx --router --pinia",
+	"svelte":  "npx sv create . --template minimal --types ts",
+	"express": "",
+	"node":    "",
+}
+
+func buildScaffoldingSection(framework string, isGreenfield bool) string {
+	if !isGreenfield {
+		return ""
+	}
+	cmd, ok := scaffoldCmds[framework]
+	if !ok || cmd == "" {
+		return ""
+	}
+
+	return fmt.Sprintf(`## Scaffolding Rules (CRITICAL for new projects)
+
+The FIRST bead MUST use the official scaffolding tool to initialize the project.
+Do NOT hand-write package.json, tsconfig.json, or config files.
+
+Scaffold command: %s
+
+Rules for the scaffold bead:
+- Run the scaffold command above via Bash — it is fully non-interactive
+- After scaffolding, install any additional dependencies via npm/pnpm
+- The files: field should list only files you MODIFY after scaffolding (e.g., add better-sqlite3 to package.json)
+- Set verify_extra: ["test -f package.json", "npx tsc --noEmit"] to confirm success
+- ALL subsequent beads MUST use the directory structure created by the scaffolding tool
+
+`, cmd)
+}
+
+// frameworkPractices maps framework names to their convention guidelines.
+var frameworkPractices = map[string]string{
+	"next": `## Next.js Conventions (MUST follow)
+- Use src/ directory: src/app/ for routes, src/components/ for components, src/lib/ for utilities
+- next.config.ts (TypeScript) with serverExternalPackages for Node-only deps like better-sqlite3
+- Server Components by default; add "use client" only for interactive components
+- API routes in src/app/api/
+- Include ESLint configuration (created by scaffolding tool)
+- Separate types into src/lib/types.ts`,
+
+	"react": `## React Conventions
+- Use src/ directory for all source code
+- Components in src/components/, hooks in src/hooks/, utils in src/utils/
+- Functional components with hooks only`,
+
+	"vue": `## Vue Conventions
+- Use src/ directory with src/components/, src/views/, src/composables/
+- Use Composition API with script setup`,
+}
+
+func buildFrameworkPractices(framework string) string {
+	practices, ok := frameworkPractices[framework]
+	if !ok {
+		return ""
+	}
+	return practices + "\n\n"
+}
+
 // BuildPlanPrompt constructs the full prompt for Claude to generate an execution
 // plan. It incorporates requirements, stack information, Knowledge Graph data,
 // accumulated learnings, and optional user feedback from a rejected plan.
-func BuildPlanPrompt(requirements *Requirements, stackInfo detect.StackInfo, graphData string, learnings []string, feedback string) string {
+func BuildPlanPrompt(requirements *Requirements, stackInfo detect.StackInfo, graphData string, learnings []string, feedback string, isGreenfield bool) string {
 	var b strings.Builder
 
 	b.WriteString("# Task: Create an Execution Plan\n\n")
@@ -45,6 +110,24 @@ func BuildPlanPrompt(requirements *Requirements, stackInfo detect.StackInfo, gra
 		b.WriteString(fmt.Sprintf("- Lint Command: %s\n", stackInfo.LintCmd))
 	}
 	b.WriteString("\n")
+
+	// Scaffolding section for greenfield projects.
+	scaffolding := buildScaffoldingSection(stackInfo.Framework, isGreenfield)
+	if scaffolding != "" {
+		b.WriteString(scaffolding)
+	}
+
+	// Framework-specific best practices.
+	practices := buildFrameworkPractices(stackInfo.Framework)
+	if practices != "" {
+		b.WriteString(practices)
+	}
+
+	// Live version data from npm registry.
+	versionData := DiscoverVersions(stackInfo.Framework)
+	if versionData != "" {
+		b.WriteString(versionData)
+	}
 
 	// Knowledge Graph data (pre-embedded code context)
 	if graphData != "" {

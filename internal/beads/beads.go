@@ -18,6 +18,7 @@ type Bead struct {
 	Status      string   `json:"status"` // "open", "in_progress", "done", "stuck"
 	DependsOn   []string `json:"depends_on"`
 	Files       []string `json:"files"`
+	VerifyExtra []string `json:"verify_extra,omitempty"`
 }
 
 // ErrBDNotInstalled is returned when the bd CLI is not found in PATH.

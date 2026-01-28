@@ -9,8 +9,9 @@ import (
 
 // CreateBeads creates beads in the beads system for each bead spec in the plan,
 // then wires up dependencies between them. It maps plan IDs (bt-1, bt-2, etc.)
-// to the actual bead IDs returned by the beads CLI.
-func CreateBeads(plan *Plan) error {
+// to the actual bead IDs returned by the beads CLI. It also writes sidecar
+// metadata (files, verify_extra) for each bead.
+func CreateBeads(plan *Plan, projectRoot string) error {
 	idMap := make(map[string]string) // plan ID -> actual bead ID
 
 	for _, spec := range plan.Beads {
@@ -20,6 +21,14 @@ func CreateBeads(plan *Plan) error {
 		}
 		idMap[spec.ID] = actualID
 		fmt.Printf("  Created bead %s -> %s\n", spec.ID, actualID)
+
+		// Write sidecar metadata for files and verify_extra.
+		if err := beads.WriteBeadMeta(projectRoot, actualID, beads.BeadMeta{
+			Files:       spec.Files,
+			VerifyExtra: spec.VerifyExtra,
+		}); err != nil {
+			fmt.Printf("  Warning: failed to write metadata for %s: %v\n", actualID, err)
+		}
 	}
 
 	for _, spec := range plan.Beads {

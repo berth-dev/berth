@@ -104,6 +104,14 @@ func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName
 			break
 		}
 
+		// Load sidecar metadata (files, verify_extra) from the plan phase.
+		if meta, err := beads.ReadBeadMeta(projectRoot, task.ID); err == nil {
+			if len(task.Files) == 0 && len(meta.Files) > 0 {
+				task.Files = meta.Files
+			}
+			task.VerifyExtra = meta.VerifyExtra
+		}
+
 		// Ensure KG MCP is alive for this bead.
 		if cfg.KnowledgeGraph.Enabled != "never" {
 			kgClient, err = graph.EnsureMCPAlive(projectRoot, cfg.KnowledgeGraph, kgClient)
@@ -211,15 +219,9 @@ func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName
 // We only commit here if there are leftover unstaged changes (e.g., generated files
 // that Claude didn't stage). This avoids duplicate commits per bead.
 func onBeadSuccess(task *beads.Bead, kgClient *graph.Client, projectRoot string, logger *log.Logger, systemPrompt string) error {
-	// Only commit if Claude left unstaged changes (rare).
-	// Claude's own commit is the primary one — we don't want to create
-	// a redundant "feat(berth):" wrapper commit.
-	has, _ := git.HasChanges()
-	if has {
-		if err := git.CommitBead(task.ID, task.Title); err != nil {
-			// Non-fatal: Claude's commit already captured the main work.
-			fmt.Fprintf(os.Stderr, "Warning: failed to commit leftover changes for bead %s: %v\n", task.ID, err)
-		}
+	// Only commit berth/beads metadata — Claude already committed code.
+	if err := git.CommitMetadata(task.ID); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to commit metadata for bead %s: %v\n", task.ID, err)
 	}
 
 	// Close the bead.

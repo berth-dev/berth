@@ -63,10 +63,9 @@ func buildPipeline(cfg config.Config, bead *beads.Bead) []string {
 	pipeline := make([]string, 0, len(cfg.VerifyPipeline))
 	pipeline = append(pipeline, cfg.VerifyPipeline...)
 
-	// The Bead struct uses the Files field; there is no verify_extra
-	// field on the struct currently. If bead-specific commands are
-	// added later, they would be appended here.
-	_ = bead
+	if len(bead.VerifyExtra) > 0 {
+		pipeline = append(pipeline, bead.VerifyExtra...)
+	}
 
 	return pipeline
 }

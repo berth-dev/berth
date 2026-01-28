@@ -57,6 +57,34 @@ func CommitFiles(files []string, message string) error {
 	return nil
 }
 
+// CommitMetadata stages only .berth/ and .beads/ directories and commits.
+// Used to capture berth-internal metadata without duplicating code commits.
+func CommitMetadata(beadID string) error {
+	if err := ensureGit(); err != nil {
+		return err
+	}
+
+	// Stage only metadata directories.
+	for _, dir := range []string{".berth/", ".beads/"} {
+		addCmd := exec.Command("git", "add", dir)
+		_ = addCmd.Run() // Ignore if path doesn't exist.
+	}
+
+	// Check if anything was actually staged.
+	cmd := exec.Command("git", "diff", "--cached", "--quiet")
+	if cmd.Run() == nil {
+		return nil // Nothing staged.
+	}
+
+	commitMsg := fmt.Sprintf("chore(berth): update metadata for %s", beadID)
+	commitCmd := exec.Command("git", "commit", "-m", commitMsg)
+	if out, err := commitCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	return nil
+}
+
 // HasChanges returns true if the working tree has uncommitted changes.
 // Shells out to: git status --porcelain
 func HasChanges() (bool, error) {

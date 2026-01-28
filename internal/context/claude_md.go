@@ -67,7 +67,7 @@ Use these tools for AD-HOC queries when you discover something unexpected.
 ## Rules
 - NEVER create new types if one already exists (query Knowledge Graph)
 - NEVER modify function signatures without checking callers (query Knowledge Graph)
-- Commit with conventional format: feat(berth): description
+- Commit with conventional format: <type>(<scope>): <description> — scope is the area of code changed (e.g., auth, api, ui), NOT "berth"
 - Report learnings at end of execution
 `
 
