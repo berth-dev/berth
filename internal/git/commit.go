@@ -98,3 +98,9 @@ func HasChanges() (bool, error) {
 	}
 	return strings.TrimSpace(string(out)) != "", nil
 }
+
+// IsIgnored returns true if the given path is ignored by .gitignore.
+func IsIgnored(path string) bool {
+	cmd := exec.Command("git", "check-ignore", "-q", path)
+	return cmd.Run() == nil
+}

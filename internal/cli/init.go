@@ -203,15 +203,35 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 // commitBerthInit stages .gitignore and .berth/config.yaml and commits them.
 // If the repo has no commits yet, creates an initial empty commit first.
+// Silently skips if files are gitignored or if there are no changes to commit.
 func commitBerthInit(dir string) error {
 	// Ensure at least one commit exists so we can stage files.
 	if err := git.EnsureInitialCommit(); err != nil {
 		return err
 	}
 
-	// Stage the berth init files.
-	files := []string{".gitignore", ".berth/config.yaml"}
+	// Filter out gitignored files.
+	candidates := []string{".gitignore", ".berth/config.yaml"}
+	var files []string
+	for _, f := range candidates {
+		if !git.IsIgnored(f) {
+			files = append(files, f)
+		}
+	}
+
+	// Nothing to commit if all files are ignored.
+	if len(files) == 0 {
+		return nil
+	}
+
+	// Try to commit; ignore "nothing to commit" errors silently.
 	if err := git.CommitFiles(files, "chore: initialize berth"); err != nil {
+		// Check if error is just "nothing to commit" - this is fine.
+		errStr := err.Error()
+		if strings.Contains(errStr, "nothing to commit") ||
+			strings.Contains(errStr, "no changes added to commit") {
+			return nil
+		}
 		return err
 	}
 

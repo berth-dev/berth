@@ -237,21 +237,37 @@ func extractTitle(content string) string {
 	return "Untitled Task"
 }
 
-// cleanJSONOutput strips markdown code fences and leading/trailing whitespace
-// from Claude's output, since models sometimes wrap JSON in ```json blocks.
+// cleanJSONOutput extracts JSON from Claude's output, handling cases where
+// the model includes explanatory text before/after the JSON or wraps it in
+// markdown code fences.
 func cleanJSONOutput(s string) string {
 	s = strings.TrimSpace(s)
 
-	// Remove ```json ... ``` fences.
-	if strings.HasPrefix(s, "```") {
-		// Find the end of the opening fence line.
-		if idx := strings.Index(s, "\n"); idx != -1 {
-			s = s[idx+1:]
+	// Try to extract JSON from markdown code fences first.
+	if idx := strings.Index(s, "```json"); idx != -1 {
+		s = s[idx+7:] // Skip "```json"
+		if endIdx := strings.Index(s, "```"); endIdx != -1 {
+			s = s[:endIdx]
 		}
-		// Remove trailing fence.
-		if idx := strings.LastIndex(s, "```"); idx != -1 {
-			s = s[:idx]
+		return strings.TrimSpace(s)
+	}
+	if idx := strings.Index(s, "```"); idx != -1 {
+		s = s[idx+3:] // Skip "```"
+		// Skip optional language identifier on same line.
+		if nlIdx := strings.Index(s, "\n"); nlIdx != -1 && nlIdx < 20 {
+			s = s[nlIdx+1:]
 		}
+		if endIdx := strings.Index(s, "```"); endIdx != -1 {
+			s = s[:endIdx]
+		}
+		return strings.TrimSpace(s)
+	}
+
+	// No code fence found. Try to find JSON object boundaries.
+	start := strings.Index(s, "{")
+	end := strings.LastIndex(s, "}")
+	if start != -1 && end != -1 && end > start {
+		return s[start : end+1]
 	}
 
 	return strings.TrimSpace(s)
