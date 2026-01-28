@@ -45,7 +45,7 @@ func init() {
 	runCmd.Flags().BoolVar(&skipApproveFlag, "skip-approve", false, "Auto-approve the generated plan")
 	runCmd.Flags().BoolVar(&reindexFlag, "reindex", false, "Force full Knowledge Graph reindex")
 	runCmd.Flags().StringVar(&branchFlag, "branch", "", "Custom branch name (default: berth/{sanitized-description})")
-	runCmd.Flags().BoolVar(&parallelFlag, "parallel", false, "Enable parallel bead execution (not yet implemented)")
+	runCmd.Flags().BoolVar(&parallelFlag, "parallel", false, "Enable parallel bead execution")
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
@@ -68,10 +68,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not a git repository. Initialize git first")
 	}
 
-	if parallelFlag {
-		fmt.Println("Warning: --parallel is not yet implemented; running sequentially.")
-	}
-
 	// Get project root.
 	projectRoot, err := os.Getwd()
 	if err != nil {
@@ -82,6 +78,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 	cfg, err := config.ReadConfig(".")
 	if err != nil {
 		return fmt.Errorf("reading config: %w", err)
+	}
+
+	if parallelFlag {
+		cfg.Execution.ParallelMode = "always"
 	}
 
 	// Detect stack info.
