@@ -46,11 +46,18 @@ golangci-lint run                # Lint
 ## Git
 
 - Commit format: `<type>(<scope>): <description>`
-- Scope: exactly one word (e.g. `plan`, `execute`, `graph`). Never multiple scopes. If a change spans multiple scopes, split into separate commits — one per scope.
+- Scope: exactly one word (e.g. `plan`, `execute`, `graph`). Never multiple scopes.
 - Types: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `ci`, `build`, `style`, `chore`, `revert`
 - Subject: imperative mood, lowercase, no period, max 50 chars
 - Body: only when the *why* isn't obvious from the subject, wrap at 72 chars
-- One logical change per commit
+- 
+### Commit granularity
+
+- A commit is a **reviewable unit**: one feature, one fix, or one refactor. Not one file, not one function.
+- Include all supporting changes (config fields, log events, type definitions, helpers) in the same commit as the feature that introduces them. Don't split scaffolding into its own commit.
+- Scope describes the **primary** package being changed. Cross-package changes are fine in one commit when they serve a single purpose.
+- Only make a separate commit when the change is **independently useful** — e.g. a refactor that has value without the feature, or a bug fix unrelated to the feature.
+- Target: 3–8 commits for a multi-package feature. >10 commits where most touch 1 file is over-split.
 
 **Examples:**
 ```
