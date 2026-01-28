@@ -28,7 +28,18 @@ const (
 // RunExecute is the main execution entry point. It creates a feature branch,
 // starts the KG MCP server, and processes beads one at a time through the
 // retry loop until all beads are completed, stuck, or skipped.
+// If parallel mode is active, delegates to RunExecuteParallel.
 func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName string) error {
+	// Check if parallel execution is appropriate.
+	allBeadsList, err := beads.List()
+	if err != nil {
+		return fmt.Errorf("listing beads for mode check: %w", err)
+	}
+	if ShouldRunParallel(cfg, allBeadsList) {
+		fmt.Println("Parallel mode enabled")
+		return RunExecuteParallel(cfg, projectRoot, runDir, branchName, allBeadsList)
+	}
+
 	// 1. Create a git branch for this execution run.
 	// If the repo has no commits, create an initial empty commit first
 	// so we have something to branch from.
@@ -143,7 +154,7 @@ func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName
 
 		// Execute with retry logic.
 		// RetryBead is defined in retry.go (same package, implemented by another agent).
-		passed, retryErr := RetryBead(cfg, task, graphData, projectRoot, logger, kgClient)
+		passed, retryErr := RetryBead(cfg, task, graphData, projectRoot, logger, kgClient, nil)
 		if retryErr != nil {
 			fmt.Fprintf(os.Stderr, "Error during bead %s execution: %v\n", task.ID, retryErr)
 		}
