@@ -158,15 +158,35 @@ func BuildPlanPrompt(requirements *Requirements, stackInfo detect.StackInfo, gra
 
 - Break work into as many beads as needed (no artificial cap)
 - Each bead must:
-  - Touch <=5 files
   - Have exactly 1 responsibility
   - Be describable in a short paragraph
   - List exact files to modify (from Knowledge Graph)
   - Include context about what already exists in those files
   - Define dependencies on other beads
-- If a bead touches >5 files, split it
+- File count guidelines:
+  - Default: <=5 files per bead for complex/creative changes (new logic, new features)
+  - Up to 10 files for mechanical/repetitive changes (renames, signature updates, import fixes, type propagation) where every file gets the same small edit
+  - Split at responsibility boundaries, not file count — a rename across 10 files is one bead, a new feature touching 4 files with complex logic is one bead
 - Define verify_extra commands per bead (beyond default pipeline)
 - Output: plan in structured markdown with bead definitions
+
+## Bead Sizing Guidelines
+
+Right-size the number of beads to task complexity:
+- Trivial (rename, config change, add a flag): 1 bead
+- Simple (one endpoint, one bug fix, one component): 1-2 beads
+- Medium (new feature, 3-5 files): 2-4 beads
+- Large (cross-cutting refactor, new subsystem): 5+ beads
+
+Do NOT over-split. If one Claude session could complete the work in a single focused pass, it is one bead.
+
+Signs of too many beads:
+- Multiple beads each touching only 1 file with trivial changes
+- Beads that just "update imports" or "fix lint" after another bead
+- A chain of 3+ sequential beads where each depends on the previous
+- A bead whose only job is to run a command (e.g. "npm install")
+
+Never create a bead that only installs dependencies. Include installation as part of the setup bead.
 
 ## Output Format
 
