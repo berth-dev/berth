@@ -23,6 +23,7 @@ It breaks work into beads (atomic tasks), executes them with fresh
 Claude processes, and verifies each step before moving on.`,
 	Version:       version,
 	SilenceErrors: true,
+	SilenceUsage:  true,
 }
 
 // Execute runs the root command. Called from main.
@@ -44,4 +45,5 @@ func init() {
 	rootCmd.AddCommand(reportCmd)
 	rootCmd.AddCommand(prCmd)
 	rootCmd.AddCommand(resumeCmd)
+	rootCmd.AddCommand(cleanCmd)
 }

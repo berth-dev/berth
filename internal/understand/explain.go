@@ -85,6 +85,7 @@ func spawnClaude(prompt string) (string, error) {
 	cmd := exec.Command(
 		"claude",
 		"-p", prompt,
+		"--allowedTools", "Read,Grep,Glob",
 		"--output-format", "json",
 		"--dangerously-skip-permissions",
 	)

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/berth-dev/berth/internal/config"
@@ -61,7 +62,11 @@ func RunPlan(cfg config.Config, requirements *Requirements, graphData string, ru
 
 		plan, err := ParsePlan(rawOutput)
 		if err != nil {
-			return nil, fmt.Errorf("parsing plan output: %w", err)
+			return nil, fmt.Errorf("parsing plan output: %w\n\nClaude's raw response:\n%s", err, rawOutput)
+		}
+
+		if err := writePlan(runDir, rawOutput); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to persist plan: %v\n", err)
 		}
 
 		choice, err := presentApprovalUI(plan, reader)
@@ -92,7 +97,14 @@ func RunPlan(cfg config.Config, requirements *Requirements, graphData string, ru
 // spawnClaude runs `claude -p` with the given prompt and returns the result
 // text extracted from Claude's JSON output envelope.
 func spawnClaude(prompt string) (string, error) {
-	cmd := exec.Command("claude", "-p", prompt, "--output-format", "json", "--dangerously-skip-permissions")
+	cmd := exec.Command(
+		"claude",
+		"-p", prompt,
+		"--allowedTools", "Read,Grep,Glob",
+		"--output-format", "json",
+		"--dangerously-skip-permissions",
+		"--model", "opus",
+	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("claude command failed: %w: %s", err, output)
@@ -199,4 +211,18 @@ func padding(n int) string {
 		n = 0
 	}
 	return strings.Repeat(" ", n)
+}
+
+// writePlan persists the raw plan content to the run directory.
+func writePlan(runDir string, content string) error {
+	if err := os.MkdirAll(runDir, 0755); err != nil {
+		return fmt.Errorf("plan: creating run directory: %w", err)
+	}
+
+	path := filepath.Join(runDir, "plan.md")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return fmt.Errorf("plan: writing plan: %w", err)
+	}
+
+	return nil
 }

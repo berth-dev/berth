@@ -113,6 +113,7 @@ Rules for the output:
 - Each bead MUST have all four fields: files, context, depends, verify_extra
 
 Output ONLY the structured plan markdown. Do not include any other text, explanations, or commentary outside the plan structure.
+Return the plan as your text response. Do NOT write it to a file.
 `)
 
 	return b.String()
