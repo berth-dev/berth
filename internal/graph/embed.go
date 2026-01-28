@@ -9,7 +9,8 @@ import (
 
 // GraphData holds pre-embedded Knowledge Graph data for a set of files.
 type GraphData struct {
-	Files []FileGraphData
+	Files  []FileGraphData
+	Impact *ImpactAnalysis
 }
 
 // FileGraphData holds graph data for a single file.
@@ -263,6 +264,36 @@ func FormatGraphData(data *GraphData) string {
 				parts = append(parts, fmt.Sprintf("used in %s:%d", u.File, u.Line))
 			}
 			b.WriteString(strings.Join(parts, ", "))
+			b.WriteString("\n")
+		}
+	}
+
+	// Impact analysis section.
+	if data.Impact != nil && (len(data.Impact.DirectDependents) > 0 || len(data.Impact.TransitiveDependents) > 0 || len(data.Impact.AffectedTests) > 0) {
+		hasContent = true
+		b.WriteString("\n### Impact Analysis\n")
+		b.WriteString("Changing these files may affect:\n")
+		if len(data.Impact.DirectDependents) > 0 {
+			b.WriteString("- Direct dependents: ")
+			parts := make([]string, 0, len(data.Impact.DirectDependents))
+			for _, d := range data.Impact.DirectDependents {
+				parts = append(parts, fmt.Sprintf("%s (%s via %s)", d.File, d.Kind, d.Name))
+			}
+			b.WriteString(strings.Join(parts, ", "))
+			b.WriteString("\n")
+		}
+		if len(data.Impact.TransitiveDependents) > 0 {
+			b.WriteString("- Transitive dependents: ")
+			parts := make([]string, 0, len(data.Impact.TransitiveDependents))
+			for _, t := range data.Impact.TransitiveDependents {
+				parts = append(parts, fmt.Sprintf("%s (via %s)", t.File, t.Via))
+			}
+			b.WriteString(strings.Join(parts, ", "))
+			b.WriteString("\n")
+		}
+		if len(data.Impact.AffectedTests) > 0 {
+			b.WriteString("- Affected tests: ")
+			b.WriteString(strings.Join(data.Impact.AffectedTests, ", "))
 			b.WriteString("\n")
 		}
 	}

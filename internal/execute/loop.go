@@ -272,27 +272,95 @@ func preEmbedGraphData(kgClient *graph.Client, files []string) string {
 		return ""
 	}
 
-	// Query understanding for each file via the MCP client and collect results.
 	var graphFiles []graph.FileGraphData
 	for _, file := range files {
 		understanding, err := kgClient.UnderstandFile(file)
 		if err != nil {
-			// Skip files that fail to query.
 			continue
 		}
-		if understanding != nil {
-			graphFiles = append(graphFiles, graph.FileGraphData{
-				Path:    understanding.File,
-				Exports: understanding.Exports,
-				Importers: understanding.Importers,
-			})
+		if understanding == nil {
+			continue
 		}
+
+		fgd := graph.FileGraphData{
+			Path:       understanding.File,
+			Exports:    understanding.Exports,
+			Importers:  understanding.Importers,
+			Callers:    make(map[string][]graph.CallerResult),
+			TypeUsages: make(map[string][]graph.TypeUsageResult),
+		}
+
+		// Query callers for each exported function.
+		for _, exp := range understanding.Exports {
+			if exp.Kind == "function" {
+				callers, qErr := kgClient.QueryCallers(exp.Name)
+				if qErr == nil && len(callers) > 0 {
+					fgd.Callers[exp.Name] = callers
+				}
+			}
+		}
+
+		// Query type usages for each exported type/class/interface/enum.
+		for _, exp := range understanding.Exports {
+			switch exp.Kind {
+			case "type", "class", "interface", "enum":
+				usages, qErr := kgClient.QueryTypeUsages(exp.Name)
+				if qErr == nil && len(usages) > 0 {
+					fgd.TypeUsages[exp.Name] = usages
+				}
+			}
+		}
+
+		graphFiles = append(graphFiles, fgd)
 	}
 
 	if len(graphFiles) == 0 {
 		return ""
 	}
 
-	data := &graph.GraphData{Files: graphFiles}
+	// Impact analysis for the bead's file set.
+	// AnalyzeImpact takes a single file path, so call per-file and merge
+	// with deduplication (multiple files may share dependents).
+	impact := &graph.ImpactAnalysis{}
+	seenDirect := make(map[string]bool)
+	seenTransitive := make(map[string]bool)
+	seenTests := make(map[string]bool)
+	for _, file := range files {
+		result, err := kgClient.AnalyzeImpact(file)
+		if err != nil || result == nil {
+			continue
+		}
+		for _, d := range result.DirectDependents {
+			key := d.File + "|" + d.Kind + "|" + d.Name
+			if !seenDirect[key] {
+				seenDirect[key] = true
+				impact.DirectDependents = append(impact.DirectDependents, d)
+			}
+		}
+		for _, t := range result.TransitiveDependents {
+			key := t.File + "|" + t.Via
+			if !seenTransitive[key] {
+				seenTransitive[key] = true
+				impact.TransitiveDependents = append(impact.TransitiveDependents, t)
+			}
+		}
+		for _, s := range result.AffectedTests {
+			if !seenTests[s] {
+				seenTests[s] = true
+				impact.AffectedTests = append(impact.AffectedTests, s)
+			}
+		}
+	}
+
+	// Only include impact if we found any data.
+	var impactPtr *graph.ImpactAnalysis
+	if len(impact.DirectDependents) > 0 || len(impact.TransitiveDependents) > 0 || len(impact.AffectedTests) > 0 {
+		impactPtr = impact
+	}
+
+	data := &graph.GraphData{
+		Files:  graphFiles,
+		Impact: impactPtr,
+	}
 	return graph.FormatGraphData(data)
 }
