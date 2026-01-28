@@ -53,17 +53,40 @@ type TypeUsageResult struct {
 	Kind string `json:"kind"` // "type_usage" | "extends"
 }
 
+// CallerEntry represents a caller in the understand_file response.
+type CallerEntry struct {
+	Caller string `json:"caller"`
+	File   string `json:"file"`
+	Line   int    `json:"line"`
+}
+
+// TypeUsageEntry represents a type usage in the understand_file response.
+type TypeUsageEntry struct {
+	File      string `json:"file"`
+	UsageKind string `json:"usage_kind"`
+	Line      int    `json:"line"`
+}
+
 // FileUnderstanding is the result of understand_file.
 type FileUnderstanding struct {
-	File      string           `json:"file"`
-	Exports   []ExportResult   `json:"exports"`
-	Importers []ImporterResult `json:"importers"`
+	File      string                       `json:"file"`
+	Exports   []ExportResult               `json:"exports"`
+	Importers []ImporterResult             `json:"importers"`
+	Callers   map[string][]CallerEntry     `json:"callers"`
+	Types     map[string][]TypeUsageEntry  `json:"types"`
+}
+
+// TransitiveDependent represents a transitive dependency in the impact analysis.
+type TransitiveDependent struct {
+	File string `json:"file"`
+	Via  string `json:"via"`
 }
 
 // ImpactAnalysis is the result of analyze_impact.
 type ImpactAnalysis struct {
-	AffectedFiles   []string `json:"affected_files"`
-	AffectedSymbols []string `json:"affected_symbols"`
+	DirectDependents     []DependentResult     `json:"direct_dependents"`
+	TransitiveDependents []TransitiveDependent  `json:"transitive_dependents"`
+	AffectedTests        []string               `json:"affected_tests"`
 }
 
 // mcpRequest is a JSON-RPC 2.0 request.
@@ -86,6 +109,18 @@ type mcpResponse struct {
 type mcpError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+// mcpContent represents a single content block in an MCP tool result.
+type mcpContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// mcpToolResult represents the MCP CallToolResult envelope.
+type mcpToolResult struct {
+	Content []mcpContent `json:"content"`
+	IsError bool         `json:"isError,omitempty"`
 }
 
 // toolCallParams holds the parameters for an MCP tools/call request.
@@ -210,7 +245,21 @@ func (c *Client) callTool(name string, args map[string]any, result any) error {
 		}
 
 		if result != nil && resp.Result != nil {
-			if err := json.Unmarshal(resp.Result, result); err != nil {
+			var envelope mcpToolResult
+			if err := json.Unmarshal(resp.Result, &envelope); err != nil {
+				return fmt.Errorf("graph: unmarshalling MCP envelope: %w", err)
+			}
+			if envelope.IsError {
+				text := ""
+				if len(envelope.Content) > 0 {
+					text = envelope.Content[0].Text
+				}
+				return fmt.Errorf("graph: MCP tool error: %s", text)
+			}
+			if len(envelope.Content) == 0 || envelope.Content[0].Type != "text" {
+				return fmt.Errorf("graph: unexpected MCP response: no text content")
+			}
+			if err := json.Unmarshal([]byte(envelope.Content[0].Text), result); err != nil {
 				return fmt.Errorf("graph: unmarshalling result: %w", err)
 			}
 		}
@@ -225,42 +274,42 @@ func (c *Client) callTool(name string, args map[string]any, result any) error {
 // QueryCallers returns all callers of the named function.
 func (c *Client) QueryCallers(name string) ([]CallerResult, error) {
 	var results []CallerResult
-	err := c.callTool("query_callers", map[string]any{"name": name}, &results)
+	err := c.callTool("get_callers", map[string]any{"symbol_name": name}, &results)
 	return results, err
 }
 
 // QueryCallees returns all functions called by the named function.
 func (c *Client) QueryCallees(name string) ([]CalleeResult, error) {
 	var results []CalleeResult
-	err := c.callTool("query_callees", map[string]any{"name": name}, &results)
+	err := c.callTool("get_callees", map[string]any{"symbol_name": name}, &results)
 	return results, err
 }
 
-// QueryDependents returns all symbols dependent on the named symbol.
-func (c *Client) QueryDependents(name string) ([]DependentResult, error) {
+// QueryDependents returns all files dependent on the specified file.
+func (c *Client) QueryDependents(filePath string) ([]DependentResult, error) {
 	var results []DependentResult
-	err := c.callTool("query_dependents", map[string]any{"name": name}, &results)
+	err := c.callTool("get_dependents", map[string]any{"file_path": filePath}, &results)
 	return results, err
 }
 
 // QueryExports returns all exported symbols from the specified file.
 func (c *Client) QueryExports(file string) ([]ExportResult, error) {
 	var results []ExportResult
-	err := c.callTool("query_exports", map[string]any{"file": file}, &results)
+	err := c.callTool("get_exports", map[string]any{"file_path": file}, &results)
 	return results, err
 }
 
 // QueryImporters returns all files that import from the specified file.
 func (c *Client) QueryImporters(file string) ([]ImporterResult, error) {
 	var results []ImporterResult
-	err := c.callTool("query_importers", map[string]any{"file": file}, &results)
+	err := c.callTool("get_importers", map[string]any{"file_path": file}, &results)
 	return results, err
 }
 
 // QueryTypeUsages returns all locations where the named type is used.
 func (c *Client) QueryTypeUsages(typeName string) ([]TypeUsageResult, error) {
 	var results []TypeUsageResult
-	err := c.callTool("query_type_usages", map[string]any{"type_name": typeName}, &results)
+	err := c.callTool("get_type_usages", map[string]any{"type_name": typeName}, &results)
 	return results, err
 }
 
@@ -268,17 +317,17 @@ func (c *Client) QueryTypeUsages(typeName string) ([]TypeUsageResult, error) {
 // including exports and importers.
 func (c *Client) UnderstandFile(file string) (*FileUnderstanding, error) {
 	var result FileUnderstanding
-	err := c.callTool("understand_file", map[string]any{"file": file}, &result)
+	err := c.callTool("understand_file", map[string]any{"file_path": file}, &result)
 	if err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// AnalyzeImpact returns the impact analysis for changes to the specified files.
-func (c *Client) AnalyzeImpact(files []string) (*ImpactAnalysis, error) {
+// AnalyzeImpact returns the impact analysis for changes to the specified file.
+func (c *Client) AnalyzeImpact(filePath string) (*ImpactAnalysis, error) {
 	var result ImpactAnalysis
-	err := c.callTool("analyze_impact", map[string]any{"files": files}, &result)
+	err := c.callTool("analyze_impact", map[string]any{"file_path": filePath}, &result)
 	if err != nil {
 		return nil, err
 	}
@@ -287,10 +336,10 @@ func (c *Client) AnalyzeImpact(files []string) (*ImpactAnalysis, error) {
 
 // ReindexFiles triggers reindexing of the specified files in the KG.
 func (c *Client) ReindexFiles(files []string) error {
-	return c.callTool("reindex_files", map[string]any{"files": files}, nil)
+	return c.callTool("reindex_files", map[string]any{"file_paths": files}, nil)
 }
 
 // FullReindex triggers a full reindex of the entire project.
 func (c *Client) FullReindex() error {
-	return c.callTool("full_reindex", nil, nil)
+	return c.callTool("reindex", nil, nil)
 }
