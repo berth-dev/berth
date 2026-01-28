@@ -46,4 +46,5 @@ func init() {
 	rootCmd.AddCommand(prCmd)
 	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(cleanCmd)
+	rootCmd.AddCommand(bridgeCmd)
 }
