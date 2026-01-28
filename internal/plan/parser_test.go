@@ -201,24 +201,64 @@ func TestParseFilesList(t *testing.T) {
 func TestParseDependsList(t *testing.T) {
 	tests := []struct {
 		input    string
-		expected int
+		expected []string
 	}{
-		{"none", 0},
-		{"", 0},
-		{"[]", 0},
-		{"n/a", 0},
-		{"bt-1", 1},
-		{"bt-1, bt-2", 2},
-		{"bt-1, bt-2, bt-3", 3},
+		{"none", nil},
+		{"", nil},
+		{"[]", nil},
+		{"n/a", nil},
+		{"bt-1", []string{"bt-1"}},
+		{"bt-1, bt-2", []string{"bt-1", "bt-2"}},
+		{"bt-1, bt-2, bt-3", []string{"bt-1", "bt-2", "bt-3"}},
+		{"[bt-1, bt-2]", []string{"bt-1", "bt-2"}},
+		{"[bt-4, bt-5]", []string{"bt-4", "bt-5"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			result := parseDependsList(tt.input)
-			if len(result) != tt.expected {
-				t.Errorf("got %d deps, want %d: %v", len(result), tt.expected, result)
+			if len(result) != len(tt.expected) {
+				t.Fatalf("got %d deps, want %d: %v", len(result), len(tt.expected), result)
+			}
+			for i, dep := range tt.expected {
+				if result[i] != dep {
+					t.Errorf("dep[%d] = %q, want %q", i, result[i], dep)
+				}
 			}
 		})
+	}
+}
+
+func TestParsePlan_BracketedDependencies(t *testing.T) {
+	input := `# Test Plan
+
+### bt-1: First task
+- files: [a.go]
+- context: Do first thing
+- depends: none
+
+### bt-2: Second task
+- files: [b.go]
+- context: Do second thing
+- depends: none
+
+### bt-3: Depends on both with brackets
+- files: [c.go]
+- context: Combine results
+- depends: [bt-1, bt-2]
+`
+
+	plan, err := ParsePlan(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	b2 := plan.Beads[2]
+	if len(b2.DependsOn) != 2 {
+		t.Fatalf("Beads[2].DependsOn count = %d, want 2: %v", len(b2.DependsOn), b2.DependsOn)
+	}
+	if b2.DependsOn[0] != "bt-1" || b2.DependsOn[1] != "bt-2" {
+		t.Errorf("Beads[2].DependsOn = %v, want [bt-1, bt-2]", b2.DependsOn)
 	}
 }
 

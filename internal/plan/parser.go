@@ -212,11 +212,16 @@ func parseFilesList(val string) []string {
 
 // parseDependsList parses a dependency list.
 // Input: "none" -> empty, "bt-1, bt-2" -> ["bt-1", "bt-2"]
+// Also handles bracketed form: "[bt-1, bt-2]" -> ["bt-1", "bt-2"]
 func parseDependsList(val string) []string {
 	lower := strings.ToLower(strings.TrimSpace(val))
 	if lower == "none" || lower == "" || lower == "[]" || lower == "n/a" {
 		return nil
 	}
+
+	// Remove brackets (handles single or double: "[bt-1, bt-2]" or "[[bt-1, bt-2]]")
+	val = strings.TrimPrefix(val, "[")
+	val = strings.TrimSuffix(val, "]")
 
 	parts := strings.Split(val, ",")
 	var deps []string
