@@ -31,11 +31,15 @@ type ProjectConfig struct {
 
 // ExecutionConfig controls bead execution behaviour.
 type ExecutionConfig struct {
-	MaxRetries     int    `yaml:"max_retries"`
-	TimeoutPerBead int    `yaml:"timeout_per_bead"` // seconds
-	BranchPrefix   string `yaml:"branch_prefix"`
-	AutoCommit     bool   `yaml:"auto_commit"`
-	AutoPR         bool   `yaml:"auto_pr"`
+	MaxRetries        int    `yaml:"max_retries"`
+	TimeoutPerBead    int    `yaml:"timeout_per_bead"` // seconds
+	BranchPrefix      string `yaml:"branch_prefix"`
+	AutoCommit        bool   `yaml:"auto_commit"`
+	AutoPR            bool   `yaml:"auto_pr"`
+	ParallelMode      string `yaml:"parallel_mode"`      // "auto"|"always"|"never"
+	MaxParallel       int    `yaml:"max_parallel"`        // default 5
+	ParallelThreshold int    `yaml:"parallel_threshold"`  // min beads for auto-parallel
+	MergeStrategy     string `yaml:"merge_strategy"`      // "merge" (default)
 }
 
 // KGConfig controls the Knowledge Graph MCP server integration.
@@ -107,11 +111,15 @@ func DefaultConfig() *Config {
 		Version: 1,
 		Model:   "opus",
 		Execution: ExecutionConfig{
-			MaxRetries:     3,
-			TimeoutPerBead: 600,
-			BranchPrefix:   "berth/",
-			AutoCommit:     true,
-			AutoPR:         false,
+			MaxRetries:        3,
+			TimeoutPerBead:    600,
+			BranchPrefix:      "berth/",
+			AutoCommit:        true,
+			AutoPR:            false,
+			ParallelMode:      "auto",
+			MaxParallel:       5,
+			ParallelThreshold: 4,
+			MergeStrategy:     "merge",
 		},
 		KnowledgeGraph: KGConfig{
 			Enabled:         "auto",
