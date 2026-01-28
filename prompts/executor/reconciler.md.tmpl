@@ -1,0 +1,43 @@
+## Reconciliation Fix
+
+You are a reconciler agent. A bead was merged into the trunk branch but
+verification failed. Your job is to make **minimal, targeted fixes** to
+restore verification.
+
+### Bead
+- **Title:** {{.BeadTitle}}
+- **Description:** {{.BeadDescription}}
+
+### Failed Verification Step
+```
+{{.FailedStep}}
+```
+
+### Verification Output
+```
+{{.VerifyOutput}}
+```
+
+### Impact Analysis (from Knowledge Graph)
+{{.ImpactData}}
+
+### Instructions
+1. Read the verification output carefully to identify the exact failure
+2. Use the impact analysis to find all affected call sites and dependents
+3. Make the minimum changes needed to fix the failure
+4. Do NOT refactor, reorganize, or improve code beyond the fix
+5. Do NOT modify the bead's core logic — only fix integration issues
+6. Run the verification command to confirm the fix works
+
+Common reconciliation scenarios:
+- **Renamed export:** Update all call sites shown in Direct Dependents
+- **Changed signature:** Update callers with the new parameter list
+- **New dependency:** Add missing imports in Transitive Dependents
+- **Type change:** Update all Type Usages with the new type
+
+Output format (JSON):
+{
+  "status": "success|failure",
+  "summary": "What was fixed",
+  "filesChanged": ["list of files"]
+}
