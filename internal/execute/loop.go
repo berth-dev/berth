@@ -90,7 +90,7 @@ func RunExecuteWithState(cfg config.Config, projectRoot string, runDir string, b
 	// not at defer-registration time. This handles reassignment inside the loop.
 	defer func() {
 		if kgClient != nil {
-			kgClient.Close()
+			_ = kgClient.Close()
 		}
 	}()
 

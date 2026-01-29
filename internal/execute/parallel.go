@@ -82,7 +82,7 @@ func RunExecuteParallel(cfg config.Config, projectRoot string, runDir string, br
 	}
 	defer func() {
 		if kgClient != nil {
-			kgClient.Close()
+			_ = kgClient.Close()
 		}
 	}()
 
@@ -113,9 +113,9 @@ func RunExecuteParallel(cfg config.Config, projectRoot string, runDir string, br
 	if err != nil {
 		return fmt.Errorf("starting coordinator server: %w", err)
 	}
-	go coordServer.Start()
+	go func() { _ = coordServer.Start() }()
 	coordServer.StartLockReaper(5 * time.Minute)
-	defer coordServer.Stop()
+	defer func() { _ = coordServer.Stop() }()
 
 	fmt.Printf("Coordinator server running on %s\n", coordServer.Addr())
 
