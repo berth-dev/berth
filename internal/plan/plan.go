@@ -116,7 +116,7 @@ func spawnClaude(prompt string) (string, error) {
 	}
 
 	if envelope.IsError {
-		return "", fmt.Errorf("Claude returned an error: %s", envelope.Result)
+		return "", fmt.Errorf("claude returned an error: %s", envelope.Result)
 	}
 
 	return envelope.Result, nil
