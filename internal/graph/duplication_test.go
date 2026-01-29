@@ -48,11 +48,11 @@ func TestWarnIfDuplicatesNoDuplicates(t *testing.T) {
 
 	WarnIfDuplicates(result)
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 
 	if buf.Len() > 0 {
 		t.Errorf("WarnIfDuplicates should not print when HasDuplicates=false, got: %s", buf.String())
@@ -72,11 +72,11 @@ func TestWarnIfDuplicatesFunctionMatches(t *testing.T) {
 
 	WarnIfDuplicates(result)
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 
 	output := buf.String()
 	if output == "" {
@@ -101,11 +101,11 @@ func TestWarnIfDuplicatesTypeMatches(t *testing.T) {
 
 	WarnIfDuplicates(result)
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 
 	output := buf.String()
 	if output == "" {
@@ -131,11 +131,11 @@ func TestWarnIfDuplicatesBothMatches(t *testing.T) {
 
 	WarnIfDuplicates(result)
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 
 	output := buf.String()
 	expectedFunc := "Warning: similar functions found: func.go:1\n"

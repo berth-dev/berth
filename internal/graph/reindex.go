@@ -164,7 +164,7 @@ func getIndexedFiles(db *sql.DB) []string {
 	if err != nil {
 		return nil
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var files []string
 	for rows.Next() {

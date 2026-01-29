@@ -101,7 +101,7 @@ func queryExports(db *sql.DB, file string) ([]ExportResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("querying exports: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []ExportResult
 	for rows.Next() {
@@ -123,7 +123,7 @@ func queryImporters(db *sql.DB, file string) ([]ImporterResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("querying importers: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []ImporterResult
 	for rows.Next() {
@@ -156,7 +156,7 @@ func queryCallers(db *sql.DB, name, file string) ([]CallerResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("querying callers: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []CallerResult
 	for rows.Next() {
@@ -181,7 +181,7 @@ func queryTypeUsages(db *sql.DB, name, file string) ([]TypeUsageResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("querying type usages: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []TypeUsageResult
 	for rows.Next() {
