@@ -342,6 +342,17 @@ func saveCheckpointState(runDir, runID, currentBeadID string, completedBeads, fa
 // that Claude didn't stage). This avoids duplicate commits per bead.
 // If closeReason is empty, falls back to the task title.
 func onBeadSuccess(task *beads.Bead, kgClient *graph.Client, projectRoot string, logger *log.Logger, systemPrompt string, closeReason ...string) error {
+	// Check for potential code duplication before proceeding (non-blocking warning).
+	// This helps prevent recreating existing functionality.
+	if kgClient != nil {
+		result, err := kgClient.CheckDuplicationFromTitle(task.Title)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: duplication check failed for bead %s: %v\n", task.ID, err)
+		} else {
+			graph.WarnIfDuplicates(result)
+		}
+	}
+
 	// Only commit berth/beads metadata — Claude already committed code.
 	if err := git.CommitMetadata(task.ID); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to commit metadata for bead %s: %v\n", task.ID, err)
