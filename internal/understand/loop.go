@@ -491,32 +491,27 @@ func extractTitle(content string) string {
 func cleanJSONOutput(s string) string {
 	s = strings.TrimSpace(s)
 
-	// Try to extract JSON from markdown code fences first.
-	if idx := strings.Index(s, "```json"); idx != -1 {
-		s = s[idx+7:] // Skip "```json"
-		if endIdx := strings.Index(s, "```"); endIdx != -1 {
-			s = s[:endIdx]
-		}
-		return strings.TrimSpace(s)
-	}
-	if idx := strings.Index(s, "```"); idx != -1 {
-		s = s[idx+3:] // Skip "```"
-		// Skip optional language identifier on same line.
-		if nlIdx := strings.Index(s, "\n"); nlIdx != -1 && nlIdx < 20 {
-			s = s[nlIdx+1:]
-		}
-		if endIdx := strings.Index(s, "```"); endIdx != -1 {
-			s = s[:endIdx]
-		}
-		return strings.TrimSpace(s)
+	// Find the start of a JSON object.
+	start := strings.Index(s, "{")
+	if start == -1 {
+		return s
 	}
 
-	// No code fence found. Try to find JSON object boundaries.
-	start := strings.Index(s, "{")
+	// Use json.Decoder to find the complete JSON object. This correctly
+	// handles nested braces inside strings (e.g., markdown with code fences
+	// in requirements_md won't cause premature truncation).
+	decoder := json.NewDecoder(strings.NewReader(s[start:]))
+	var raw json.RawMessage
+	if err := decoder.Decode(&raw); err == nil {
+		return string(raw)
+	}
+
+	// Fallback: use simple brace matching (less reliable but handles some
+	// edge cases where JSON is malformed but still parseable).
 	end := strings.LastIndex(s, "}")
-	if start != -1 && end != -1 && end > start {
+	if end > start {
 		return s[start : end+1]
 	}
 
-	return strings.TrimSpace(s)
+	return s
 }
