@@ -282,10 +282,7 @@ func (s *Server) handleAnnounceIntent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return related decisions.
-	var relatedDecisions []Decision
-	for _, d := range s.state.Decisions {
-		relatedDecisions = append(relatedDecisions, d)
-	}
+	relatedDecisions := append([]Decision{}, s.state.Decisions...)
 
 	writeJSON(w, AnnounceIntentResponse{
 		Conflicts: conflicts,
@@ -302,12 +299,7 @@ func (s *Server) handlePublishArtifact(w http.ResponseWriter, r *http.Request) {
 	s.state.mu.Lock()
 	defer s.state.mu.Unlock()
 
-	s.state.Artifacts = append(s.state.Artifacts, Artifact{
-		BeadID:   req.BeadID,
-		Name:     req.Name,
-		FilePath: req.FilePath,
-		Exports:  req.Exports,
-	})
+	s.state.Artifacts = append(s.state.Artifacts, Artifact(req))
 
 	writeJSON(w, PublishArtifactResponse{OK: true})
 }
@@ -375,7 +367,7 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 		// Allow empty body for requests with no fields.
 		return true
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
 		return false
