@@ -82,6 +82,25 @@ func runResume(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Load checkpoint to restore execution state.
+	checkpoint, checkpointErr := execute.LoadCheckpoint(runDir)
+	if checkpointErr != nil {
+		// Checkpoint corrupted: warn user but continue with fresh state.
+		fmt.Fprintf(os.Stderr, "Warning: failed to load checkpoint (continuing with fresh state): %v\n", checkpointErr)
+		checkpoint = nil
+	}
+
+	// Prepare execution state from checkpoint.
+	var execState *execute.ExecuteState
+	if checkpoint != nil {
+		fmt.Printf("Restored checkpoint state: %d completed, %d failed, %d consecutive failures\n",
+			len(checkpoint.CompletedBeads), len(checkpoint.FailedBeads), checkpoint.ConsecFailures)
+		execState = &execute.ExecuteState{
+			RetryCount:     checkpoint.RetryCount,
+			ConsecFailures: checkpoint.ConsecFailures,
+		}
+	}
+
 	// List all beads to handle stuck and in_progress states.
 	allBeads, err := beads.List()
 	if err != nil {
@@ -136,9 +155,9 @@ func runResume(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to log resume: %v\n", logErr)
 	}
 
-	// Resume execution.
+	// Resume execution with restored state.
 	fmt.Println("\nResuming execution...")
-	if execErr := execute.RunExecute(*cfg, projectRoot, runDir, branchName, Verbose()); execErr != nil {
+	if execErr := execute.RunExecuteWithState(*cfg, projectRoot, runDir, branchName, Verbose(), execState); execErr != nil {
 		fmt.Fprintf(os.Stderr, "Execute phase error: %v\n", execErr)
 		// Continue to report phase.
 	}

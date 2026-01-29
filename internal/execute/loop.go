@@ -26,11 +26,24 @@ const (
 	stuckActionAbort  = "abort"
 )
 
+// ExecuteState holds checkpoint-related state for the execution loop.
+// This is used to restore state on resume.
+type ExecuteState struct {
+	RetryCount     map[string]int // per-bead retry counts
+	ConsecFailures int            // consecutive failures for circuit breaker
+}
+
 // RunExecute is the main execution entry point. It creates a feature branch,
 // starts the KG MCP server, and processes beads one at a time through the
 // retry loop until all beads are completed, stuck, or skipped.
 // If parallel mode is active, delegates to RunExecuteParallel.
 func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName string, verbose bool) error {
+	return RunExecuteWithState(cfg, projectRoot, runDir, branchName, verbose, nil)
+}
+
+// RunExecuteWithState is the main execution entry point that accepts optional
+// restored state from a checkpoint. Used by resume to restore execution state.
+func RunExecuteWithState(cfg config.Config, projectRoot string, runDir string, branchName string, verbose bool, state *ExecuteState) error {
 	// Check if parallel execution is appropriate.
 	allBeadsList, err := beads.List()
 	if err != nil {
@@ -86,6 +99,19 @@ func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName
 		return fmt.Errorf("listing beads: %w", err)
 	}
 	pool := NewExecutionPool(len(allBeads))
+
+	// 4a. Initialize checkpoint tracking state.
+	// If we have restored state from a checkpoint, use it; otherwise start fresh.
+	retryCount := make(map[string]int)
+	consecFailures := 0
+	completedBeads := []string{}
+	failedBeads := []string{}
+	if state != nil {
+		if state.RetryCount != nil {
+			retryCount = state.RetryCount
+		}
+		consecFailures = state.ConsecFailures
+	}
 
 	// 5. Print header.
 	fmt.Printf("Executing %d beads on branch %s\n", pool.Total, branchName)
@@ -161,24 +187,32 @@ func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName
 			fmt.Fprintf(os.Stderr, "Error during bead %s execution: %v\n", task.ID, retryErr)
 		}
 
+		var lastError string
 		if passed {
 			// Bead succeeded: commit, close, record learning, reindex.
 			if err := onBeadSuccess(task, kgClient, projectRoot, logger, systemPrompt); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: post-success steps failed for bead %s: %v\n", task.ID, err)
 			}
 			pool.RecordCompletion()
+			completedBeads = append(completedBeads, task.ID)
+			consecFailures = 0 // Reset consecutive failures on success
 		} else {
 			// Bead failed all retries: enter stuck handling.
 			// HandleStuck is defined in stuck.go (same package, implemented by another agent).
 			action, stuckErr := HandleStuck(cfg, task, nil, "", graphData, projectRoot)
 			if stuckErr != nil {
 				fmt.Fprintf(os.Stderr, "Error handling stuck bead %s: %v\n", task.ID, stuckErr)
+				lastError = stuckErr.Error()
 			}
 
 			switch action.Action {
 			case stuckActionSkip:
 				pool.RecordSkip()
+				failedBeads = append(failedBeads, task.ID)
+				consecFailures++ // Increment consecutive failures
 			case stuckActionAbort:
+				// Save checkpoint before abort so state can be recovered.
+				saveCheckpointState(runDir, branchName, task.ID, completedBeads, failedBeads, retryCount, consecFailures, "aborted by user")
 				// Abort the entire run.
 				if logErr := logger.Append(log.LogEvent{
 					Event:  log.EventRunComplete,
@@ -194,16 +228,25 @@ func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName
 					fmt.Fprintf(os.Stderr, "Warning: post-rescue steps failed for bead %s: %v\n", task.ID, err)
 				}
 				pool.RecordCompletion()
+				completedBeads = append(completedBeads, task.ID)
+				consecFailures = 0 // Reset consecutive failures on success
 			case stuckActionHint:
 				// Hint succeeded verification; treat as completed.
 				if err := onBeadSuccess(task, kgClient, projectRoot, logger, systemPrompt); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: post-hint steps failed for bead %s: %v\n", task.ID, err)
 				}
 				pool.RecordCompletion()
+				completedBeads = append(completedBeads, task.ID)
+				consecFailures = 0 // Reset consecutive failures on success
 			default:
 				pool.RecordStuck()
+				failedBeads = append(failedBeads, task.ID)
+				consecFailures++ // Increment consecutive failures
 			}
 		}
+
+		// Save checkpoint after each bead completion/failure.
+		saveCheckpointState(runDir, branchName, task.ID, completedBeads, failedBeads, retryCount, consecFailures, lastError)
 
 		if pool.IsComplete() {
 			break
@@ -220,10 +263,34 @@ func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName
 		fmt.Fprintf(os.Stderr, "Warning: failed to log run_complete: %v\n", logErr)
 	}
 
+	// 10. Clear checkpoint on successful completion.
+	if pool.Stuck == 0 && pool.Skipped == 0 {
+		if err := ClearCheckpoint(runDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to clear checkpoint: %v\n", err)
+		}
+	}
+
 	fmt.Printf("Execution complete: %d completed, %d stuck, %d skipped out of %d total\n",
 		pool.Completed, pool.Stuck, pool.Skipped, pool.Total)
 
 	return nil
+}
+
+// saveCheckpointState is a helper function that saves checkpoint state.
+// Errors are logged but not returned since checkpoint is best-effort.
+func saveCheckpointState(runDir, runID, currentBeadID string, completedBeads, failedBeads []string, retryCount map[string]int, consecFailures int, lastError string) {
+	cp := &Checkpoint{
+		RunID:          runID,
+		CurrentBeadID:  currentBeadID,
+		CompletedBeads: completedBeads,
+		FailedBeads:    failedBeads,
+		RetryCount:     retryCount,
+		ConsecFailures: consecFailures,
+		LastError:      lastError,
+	}
+	if err := SaveCheckpoint(runDir, cp); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to save checkpoint: %v\n", err)
+	}
 }
 
 // onBeadSuccess handles post-success steps: close bead, append learning,
