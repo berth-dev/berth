@@ -3,6 +3,7 @@
 package execute
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -103,14 +104,17 @@ func RunExecuteWithState(cfg config.Config, projectRoot string, runDir string, b
 	// 4a. Initialize checkpoint tracking state.
 	// If we have restored state from a checkpoint, use it; otherwise start fresh.
 	retryCount := make(map[string]int)
-	consecFailures := 0
 	completedBeads := []string{}
 	failedBeads := []string{}
+
+	// 4b. Initialize circuit breaker with threshold from config.
+	breaker := NewCircuitBreaker(cfg.Execution.CircuitBreakerThreshold)
 	if state != nil {
 		if state.RetryCount != nil {
 			retryCount = state.RetryCount
 		}
-		consecFailures = state.ConsecFailures
+		// Restore circuit breaker state from checkpoint.
+		breaker.SetConsecutiveFailures(state.ConsecFailures)
 	}
 
 	// 5. Print header.
@@ -195,7 +199,7 @@ func RunExecuteWithState(cfg config.Config, projectRoot string, runDir string, b
 			}
 			pool.RecordCompletion()
 			completedBeads = append(completedBeads, task.ID)
-			consecFailures = 0 // Reset consecutive failures on success
+			breaker.RecordSuccess() // Reset consecutive failures on success
 		} else {
 			// Bead failed all retries: enter stuck handling.
 			// HandleStuck is defined in stuck.go (same package, implemented by another agent).
@@ -209,10 +213,10 @@ func RunExecuteWithState(cfg config.Config, projectRoot string, runDir string, b
 			case stuckActionSkip:
 				pool.RecordSkip()
 				failedBeads = append(failedBeads, task.ID)
-				consecFailures++ // Increment consecutive failures
+				breaker.RecordFailure() // Increment consecutive failures
 			case stuckActionAbort:
 				// Save checkpoint before abort so state can be recovered.
-				saveCheckpointState(runDir, branchName, task.ID, completedBeads, failedBeads, retryCount, consecFailures, "aborted by user")
+				saveCheckpointState(runDir, branchName, task.ID, completedBeads, failedBeads, retryCount, breaker.GetConsecutiveFailures(), "aborted by user")
 				// Abort the entire run.
 				if logErr := logger.Append(log.LogEvent{
 					Event:  log.EventRunComplete,
@@ -229,7 +233,7 @@ func RunExecuteWithState(cfg config.Config, projectRoot string, runDir string, b
 				}
 				pool.RecordCompletion()
 				completedBeads = append(completedBeads, task.ID)
-				consecFailures = 0 // Reset consecutive failures on success
+				breaker.RecordSuccess() // Reset consecutive failures on success
 			case stuckActionHint:
 				// Hint succeeded verification; treat as completed.
 				if err := onBeadSuccess(task, kgClient, projectRoot, logger, systemPrompt); err != nil {
@@ -237,16 +241,47 @@ func RunExecuteWithState(cfg config.Config, projectRoot string, runDir string, b
 				}
 				pool.RecordCompletion()
 				completedBeads = append(completedBeads, task.ID)
-				consecFailures = 0 // Reset consecutive failures on success
+				breaker.RecordSuccess() // Reset consecutive failures on success
 			default:
 				pool.RecordStuck()
 				failedBeads = append(failedBeads, task.ID)
-				consecFailures++ // Increment consecutive failures
+				breaker.RecordFailure() // Increment consecutive failures
+			}
+		}
+
+		// Check if circuit breaker should pause execution.
+		if breaker.ShouldPause() {
+			// Save checkpoint before pausing.
+			saveCheckpointState(runDir, branchName, task.ID, completedBeads, failedBeads, retryCount, breaker.GetConsecutiveFailures(), lastError)
+
+			action, err := handleCircuitBreakerPause(breaker, pool)
+			if err != nil {
+				return fmt.Errorf("circuit breaker pause error: %w", err)
+			}
+
+			switch action {
+			case "abort":
+				if logErr := logger.Append(log.LogEvent{
+					Event:  log.EventRunComplete,
+					Reason: "aborted by circuit breaker",
+					Total:  pool.Total,
+				}); logErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to log run_complete: %v\n", logErr)
+				}
+				return fmt.Errorf("run aborted by circuit breaker after %d consecutive failures", cfg.Execution.CircuitBreakerThreshold)
+			case "skip":
+				// Reset breaker and continue with remaining beads.
+				breaker.Reset()
+				fmt.Println("Circuit breaker reset. Continuing with remaining beads...")
+			case "retry":
+				// Reset breaker; the loop will naturally retry the next ready bead.
+				breaker.Reset()
+				fmt.Println("Circuit breaker reset. Retrying...")
 			}
 		}
 
 		// Save checkpoint after each bead completion/failure.
-		saveCheckpointState(runDir, branchName, task.ID, completedBeads, failedBeads, retryCount, consecFailures, lastError)
+		saveCheckpointState(runDir, branchName, task.ID, completedBeads, failedBeads, retryCount, breaker.GetConsecutiveFailures(), lastError)
 
 		if pool.IsComplete() {
 			break
@@ -455,4 +490,43 @@ func preEmbedGraphData(kgClient *graph.Client, files []string) string {
 		Impact: impactPtr,
 	}
 	return graph.FormatGraphData(data)
+}
+
+// handleCircuitBreakerPause presents the user with options when the circuit
+// breaker has triggered due to consecutive failures. Returns the user's
+// chosen action: "retry", "skip", or "abort".
+func handleCircuitBreakerPause(breaker *CircuitBreaker, pool *ExecutionPool) (string, error) {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Println()
+	fmt.Printf("Circuit breaker triggered: %d consecutive failures reached threshold.\n", breaker.ConsecutiveFailures)
+	fmt.Printf("Progress: %d completed, %d stuck, %d skipped out of %d total\n",
+		pool.Completed, pool.Stuck, pool.Skipped, pool.Total)
+	fmt.Println()
+	fmt.Println("What do you want to do?")
+	fmt.Println()
+	fmt.Println("  [1] Retry   -- Reset circuit breaker and continue execution")
+	fmt.Println("  [2] Skip    -- Skip remaining beads and finish")
+	fmt.Println("  [3] Abort   -- Stop the entire run immediately")
+	fmt.Println()
+
+	for {
+		fmt.Print("Choice: ")
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			return "", fmt.Errorf("reading user choice: %w", err)
+		}
+
+		choice := strings.TrimSpace(input)
+		switch choice {
+		case "1":
+			return "retry", nil
+		case "2":
+			return "skip", nil
+		case "3":
+			return "abort", nil
+		default:
+			fmt.Println("Invalid choice. Please enter 1, 2, or 3.")
+		}
+	}
 }
