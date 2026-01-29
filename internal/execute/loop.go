@@ -186,15 +186,22 @@ func RunExecuteWithState(cfg config.Config, projectRoot string, runDir string, b
 		// Execute with retry logic.
 		// RetryBead is defined in retry.go (same package, implemented by another agent).
 		opts := &SpawnClaudeOpts{Verbose: verbose}
-		passed, retryErr := RetryBead(cfg, task, graphData, projectRoot, logger, kgClient, opts)
+		beadResult, retryErr := RetryBead(cfg, task, graphData, projectRoot, logger, kgClient, opts)
 		if retryErr != nil {
 			fmt.Fprintf(os.Stderr, "Error during bead %s execution: %v\n", task.ID, retryErr)
 		}
 
+		// Extract summary from Claude's output for close reason.
+		var claudeOutput string
+		if beadResult != nil {
+			claudeOutput = beadResult.ClaudeOutput
+		}
+		closeReason := beads.ExtractSummary(claudeOutput, task.Title)
+
 		var lastError string
-		if passed {
+		if beadResult != nil && beadResult.Passed {
 			// Bead succeeded: commit, close, record learning, reindex.
-			if err := onBeadSuccess(task, kgClient, projectRoot, logger, systemPrompt); err != nil {
+			if err := onBeadSuccess(task, kgClient, projectRoot, logger, systemPrompt, closeReason); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: post-success steps failed for bead %s: %v\n", task.ID, err)
 			}
 			pool.RecordCompletion()
@@ -333,14 +340,21 @@ func saveCheckpointState(runDir, runID, currentBeadID string, completedBeads, fa
 // Note: Claude already commits code changes during bead execution.
 // We only commit here if there are leftover unstaged changes (e.g., generated files
 // that Claude didn't stage). This avoids duplicate commits per bead.
-func onBeadSuccess(task *beads.Bead, kgClient *graph.Client, projectRoot string, logger *log.Logger, systemPrompt string) error {
+// If closeReason is empty, falls back to the task title.
+func onBeadSuccess(task *beads.Bead, kgClient *graph.Client, projectRoot string, logger *log.Logger, systemPrompt string, closeReason ...string) error {
 	// Only commit berth/beads metadata — Claude already committed code.
 	if err := git.CommitMetadata(task.ID); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to commit metadata for bead %s: %v\n", task.ID, err)
 	}
 
-	// Close the bead.
-	if err := beads.Close(task.ID, task.Title); err != nil {
+	// Determine close reason: use provided reason or fall back to title.
+	reason := task.Title
+	if len(closeReason) > 0 && closeReason[0] != "" {
+		reason = closeReason[0]
+	}
+
+	// Close the bead with reason.
+	if err := beads.Close(task.ID, reason); err != nil {
 		return fmt.Errorf("closing bead %s: %w", task.ID, err)
 	}
 
