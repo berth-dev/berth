@@ -16,6 +16,7 @@ type Config struct {
 	Model          string          `yaml:"model"`
 	Execution      ExecutionConfig `yaml:"execution"`
 	VerifyPipeline []string        `yaml:"verify_pipeline"`
+	Verify         VerifyConfig    `yaml:"verify"`
 	KnowledgeGraph KGConfig        `yaml:"knowledge_graph"`
 	Beads          BeadsConfig     `yaml:"beads"`
 	Cleanup        CleanupConfig   `yaml:"cleanup"`
@@ -31,15 +32,16 @@ type ProjectConfig struct {
 
 // ExecutionConfig controls bead execution behaviour.
 type ExecutionConfig struct {
-	MaxRetries        int    `yaml:"max_retries"`
-	TimeoutPerBead    int    `yaml:"timeout_per_bead"` // seconds
-	BranchPrefix      string `yaml:"branch_prefix"`
-	AutoCommit        bool   `yaml:"auto_commit"`
-	AutoPR            bool   `yaml:"auto_pr"`
-	ParallelMode      string `yaml:"parallel_mode"`      // "auto"|"always"|"never"
-	MaxParallel       int    `yaml:"max_parallel"`        // default 5
-	ParallelThreshold int    `yaml:"parallel_threshold"`  // min beads for auto-parallel
-	MergeStrategy     string `yaml:"merge_strategy"`      // "merge" (default)
+	MaxRetries              int    `yaml:"max_retries"`
+	TimeoutPerBead          int    `yaml:"timeout_per_bead"`          // seconds
+	BranchPrefix            string `yaml:"branch_prefix"`
+	AutoCommit              bool   `yaml:"auto_commit"`
+	AutoPR                  bool   `yaml:"auto_pr"`
+	ParallelMode            string `yaml:"parallel_mode"`             // "auto"|"always"|"never"
+	MaxParallel             int    `yaml:"max_parallel"`              // default 5
+	ParallelThreshold       int    `yaml:"parallel_threshold"`        // min beads for auto-parallel
+	MergeStrategy           string `yaml:"merge_strategy"`            // "merge" (default)
+	CircuitBreakerThreshold int    `yaml:"circuit_breaker_threshold"` // default 3, consecutive failures before pausing
 }
 
 // KGConfig controls the Knowledge Graph MCP server integration.
@@ -59,6 +61,11 @@ type BeadsConfig struct {
 // CleanupConfig controls automatic cleanup of old run directories.
 type CleanupConfig struct {
 	MaxAgeDays int `yaml:"max_age_days"` // 0 = disable auto-prune
+}
+
+// VerifyConfig controls the verification pipeline settings.
+type VerifyConfig struct {
+	Security string `yaml:"security"` // optional security scan command
 }
 
 // configFileName is the path relative to the project root.
@@ -111,15 +118,19 @@ func DefaultConfig() *Config {
 		Version: 1,
 		Model:   "opus",
 		Execution: ExecutionConfig{
-			MaxRetries:        3,
-			TimeoutPerBead:    600,
-			BranchPrefix:      "berth/",
-			AutoCommit:        true,
-			AutoPR:            false,
-			ParallelMode:      "auto",
-			MaxParallel:       5,
-			ParallelThreshold: 4,
-			MergeStrategy:     "merge",
+			MaxRetries:              3,
+			TimeoutPerBead:          600,
+			BranchPrefix:            "berth/",
+			AutoCommit:              true,
+			AutoPR:                  false,
+			ParallelMode:            "auto",
+			MaxParallel:             5,
+			ParallelThreshold:       4,
+			MergeStrategy:           "merge",
+			CircuitBreakerThreshold: 3,
+		},
+		Verify: VerifyConfig{
+			Security: "", // disabled by default
 		},
 		KnowledgeGraph: KGConfig{
 			Enabled:         "auto",
