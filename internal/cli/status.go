@@ -25,7 +25,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	runsDir := filepath.Join(".berth", "runs")
 	entries, err := os.ReadDir(runsDir)
 	if err != nil || len(entries) == 0 {
-		return fmt.Errorf("No runs found. Start one with: berth run")
+		return fmt.Errorf("no runs found; start one with: berth run")
 	}
 
 	// Load all beads.
@@ -34,7 +34,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to list beads: %w", err)
 	}
 	if len(allBeads) == 0 {
-		return fmt.Errorf("No runs found. Start one with: berth run")
+		return fmt.Errorf("no runs found; start one with: berth run")
 	}
 
 	// Get current branch (best-effort).

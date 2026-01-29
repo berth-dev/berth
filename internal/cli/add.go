@@ -30,7 +30,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	runsDir := filepath.Join(".berth", "runs")
 	entries, err := os.ReadDir(runsDir)
 	if err != nil || len(entries) == 0 {
-		return fmt.Errorf("No active run. Start one with: berth run")
+		return fmt.Errorf("no active run; start one with: berth run")
 	}
 
 	description := args[0]
