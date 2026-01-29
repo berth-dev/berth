@@ -15,23 +15,24 @@ import (
 
 // Event type constants.
 const (
-	EventRunStarted         = "run_started"
-	EventUnderstandComplete = "understand_complete"
-	EventPlanApproved       = "plan_approved"
-	EventTaskStarted        = "task_started"
-	EventVerifyPassed       = "verify_passed"
-	EventVerifyFailed       = "verify_failed"
-	EventTaskRetry          = "task_retry"
-	EventTaskCompleted      = "task_completed"
-	EventRunComplete        = "run_complete"
-	EventWorkerStarted      = "worker_started"
-	EventWorkerCompleted    = "worker_completed"
-	EventMergeStarted       = "merge_started"
-	EventMergeCompleted     = "merge_completed"
-	EventMergeFailed        = "merge_failed"
-	EventReconcileStarted   = "reconcile_started"
-	EventReconcileCompleted = "reconcile_completed"
-	EventReconcileFailed    = "reconcile_failed"
+	EventRunStarted              = "run_started"
+	EventUnderstandComplete      = "understand_complete"
+	EventRequirementsApproval    = "requirements_approval"
+	EventPlanApproved            = "plan_approved"
+	EventTaskStarted             = "task_started"
+	EventVerifyPassed            = "verify_passed"
+	EventVerifyFailed            = "verify_failed"
+	EventTaskRetry               = "task_retry"
+	EventTaskCompleted           = "task_completed"
+	EventRunComplete             = "run_complete"
+	EventWorkerStarted           = "worker_started"
+	EventWorkerCompleted         = "worker_completed"
+	EventMergeStarted            = "merge_started"
+	EventMergeCompleted          = "merge_completed"
+	EventMergeFailed             = "merge_failed"
+	EventReconcileStarted        = "reconcile_started"
+	EventReconcileCompleted      = "reconcile_completed"
+	EventReconcileFailed         = "reconcile_failed"
 )
 
 // LogEvent represents a single structured event written to the log.
@@ -60,6 +61,7 @@ type LogEvent struct {
 	MergeFrom     string                 `json:"merge_from,omitempty"`
 	MergeTo       string                 `json:"merge_to,omitempty"`
 	ConflictFiles []string               `json:"conflict_files,omitempty"`
+	Choice        string                 `json:"choice,omitempty"`
 }
 
 // Logger writes append-only JSONL events to a log file.

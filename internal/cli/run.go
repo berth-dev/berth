@@ -147,6 +147,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 			skipUnderstandFlag,
 			runDir,
 			"", // graphSummary - empty for now
+			logger,
 		)
 		if err != nil {
 			return fmt.Errorf("understand phase: %w", err)

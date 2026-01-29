@@ -3,6 +3,7 @@
 package understand
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/berth-dev/berth/internal/config"
 	"github.com/berth-dev/berth/internal/detect"
+	"github.com/berth-dev/berth/internal/log"
 )
 
 // maxRounds is a safety cap to prevent infinite interview loops.
@@ -72,12 +74,14 @@ type Requirements struct {
 //
 // runDir is the path to the current run directory (e.g. .berth/runs/<id>)
 // where requirements.md will be written.
-func RunUnderstand(cfg config.Config, stackInfo detect.StackInfo, description string, skipUnderstand bool, runDir string, graphSummary string) (*Requirements, error) {
+//
+// The logger parameter is optional; if provided, approval choices are logged.
+func RunUnderstand(cfg config.Config, stackInfo detect.StackInfo, description string, skipUnderstand bool, runDir string, graphSummary string, logger *log.Logger) (*Requirements, error) {
 	if skipUnderstand {
 		return buildSkipRequirements(description, runDir)
 	}
 
-	return runInterviewLoop(cfg, stackInfo, description, runDir, graphSummary)
+	return runInterviewLoop(cfg, stackInfo, description, runDir, graphSummary, logger)
 }
 
 // buildSkipRequirements creates a Requirements directly from the raw
@@ -97,7 +101,9 @@ func buildSkipRequirements(description string, runDir string) (*Requirements, er
 }
 
 // runInterviewLoop is the core loop that spawns Claude once per round.
-func runInterviewLoop(cfg config.Config, stackInfo detect.StackInfo, description string, runDir string, graphSummary string) (*Requirements, error) {
+// After requirements are gathered, presents an approval gate with options:
+// accept, interview more, or chat about the plan.
+func runInterviewLoop(cfg config.Config, stackInfo detect.StackInfo, description string, runDir string, graphSummary string, logger *log.Logger) (*Requirements, error) {
 	var rounds []Round
 
 	for round := 1; round <= maxRounds; round++ {
@@ -121,9 +127,61 @@ func runInterviewLoop(cfg config.Config, stackInfo detect.StackInfo, description
 			return nil, fmt.Errorf("understand round %d: parsing response: %w\nRaw output:\n%s", round, err, output)
 		}
 
-		// If Claude signals done, write the requirements and return.
+		// If Claude signals done, present approval gate before finalizing.
 		if resp.Done {
-			return finalize(resp, runDir)
+			reqs, err := finalize(resp, runDir)
+			if err != nil {
+				return nil, err
+			}
+
+			// Present approval gate and handle user choice.
+			choice := presentApprovalGate(reqs.Content)
+
+			// Log the approval choice for audit.
+			logApprovalChoice(logger, choice, reqs.Title)
+
+			switch choice {
+			case ApprovalAccept:
+				fmt.Println("\nRequirements accepted. Proceeding to planning phase.")
+				return reqs, nil
+
+			case ApprovalInterviewMore:
+				fmt.Println("\nContinuing interview to gather more requirements...")
+				// Add a synthetic answer to indicate we want more questions.
+				rounds = append(rounds, Round{
+					Questions: []Question{{
+						ID:   "continue_interview",
+						Text: "User requested to continue interviewing for more requirements",
+					}},
+					Answers: []Answer{{
+						ID:    "continue_interview",
+						Value: "Please ask more clarifying questions to refine the requirements",
+					}},
+				})
+				continue
+
+			case ApprovalChat:
+				chatChoice := runChatLoop(reqs.Content, stackInfo, graphSummary)
+				// Log the post-chat choice.
+				logApprovalChoice(logger, chatChoice, reqs.Title)
+				if chatChoice == ApprovalAccept {
+					fmt.Println("\nRequirements accepted. Proceeding to planning phase.")
+					return reqs, nil
+				}
+				// User chose to interview more after chat.
+				fmt.Println("\nContinuing interview to gather more requirements...")
+				rounds = append(rounds, Round{
+					Questions: []Question{{
+						ID:   "continue_interview",
+						Text: "User discussed plan and requested to continue interviewing",
+					}},
+					Answers: []Answer{{
+						ID:    "continue_interview",
+						Value: "Please ask more clarifying questions based on our discussion",
+					}},
+				})
+				continue
+			}
 		}
 
 		// Not done: display questions and collect answers.
@@ -184,8 +242,20 @@ func displayAndCollectAnswers(questions []Question, stackInfo detect.StackInfo, 
 	return answers
 }
 
-// finalize writes the requirements markdown to disk and returns the
-// Requirements struct.
+// ApprovalChoice represents the user's decision after reviewing requirements.
+type ApprovalChoice int
+
+const (
+	// ApprovalAccept means proceed to planning phase.
+	ApprovalAccept ApprovalChoice = iota
+	// ApprovalInterviewMore means continue the interview loop.
+	ApprovalInterviewMore
+	// ApprovalChat means the user wants to discuss the plan before proceeding.
+	ApprovalChat
+)
+
+// finalize writes the requirements markdown to disk, presents the approval
+// gate, and returns the Requirements struct only if approved.
 func finalize(resp UnderstandResponse, runDir string) (*Requirements, error) {
 	content := resp.RequirementsMD
 	if content == "" {
@@ -204,6 +274,184 @@ func finalize(resp UnderstandResponse, runDir string) (*Requirements, error) {
 		Title:   title,
 		Content: content,
 	}, nil
+}
+
+// presentApprovalGate displays the requirements and asks the user to approve,
+// continue interviewing, or chat about the plan.
+func presentApprovalGate(content string) ApprovalChoice {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Println()
+	fmt.Println("=== Requirements Summary ===")
+	fmt.Println()
+
+	// Display a preview of the requirements (first 20 lines or full content).
+	lines := strings.Split(content, "\n")
+	previewLines := lines
+	if len(lines) > 20 {
+		previewLines = lines[:20]
+		fmt.Println(strings.Join(previewLines, "\n"))
+		fmt.Println("  ... (truncated, see full requirements.md)")
+	} else {
+		fmt.Println(strings.Join(previewLines, "\n"))
+	}
+
+	fmt.Println()
+	fmt.Println("=== Approval Gate ===")
+	fmt.Println()
+	fmt.Println("What would you like to do?")
+	fmt.Println("  [1] Accept and proceed to planning")
+	fmt.Println("  [2] Interview more (continue gathering requirements)")
+	fmt.Println("  [3] Chat about the plan (discuss before proceeding)")
+	fmt.Print("  > ")
+
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		// Default to accept on error.
+		fmt.Println("  (Read error, defaulting to Accept)")
+		return ApprovalAccept
+	}
+
+	line = strings.TrimSpace(line)
+
+	switch line {
+	case "1":
+		return ApprovalAccept
+	case "2":
+		return ApprovalInterviewMore
+	case "3":
+		return ApprovalChat
+	default:
+		// If user enters something else, default to accept.
+		fmt.Println("  (Invalid choice, defaulting to Accept)")
+		return ApprovalAccept
+	}
+}
+
+// runChatLoop allows the user to have a conversation about the plan before
+// deciding to accept or continue interviewing.
+func runChatLoop(content string, stackInfo detect.StackInfo, graphSummary string) ApprovalChoice {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Println()
+	fmt.Println("=== Chat Mode ===")
+	fmt.Println("Ask questions about the requirements or plan. Type 'done' when ready to decide.")
+	fmt.Println()
+
+	for {
+		fmt.Print("You: ")
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("  (Read error, exiting chat)")
+			break
+		}
+
+		line = strings.TrimSpace(line)
+		if strings.ToLower(line) == "done" {
+			break
+		}
+
+		if line == "" {
+			continue
+		}
+
+		// Build a prompt to answer the user's question.
+		prompt := buildChatPrompt(content, line, stackInfo, graphSummary)
+		response, err := spawnClaude(prompt)
+		if err != nil {
+			fmt.Printf("  (Error getting response: %v)\n", err)
+			continue
+		}
+
+		fmt.Println()
+		fmt.Printf("Claude: %s\n", response)
+		fmt.Println()
+	}
+
+	// After chat, present the approval gate again.
+	fmt.Println()
+	fmt.Println("Chat complete. What would you like to do?")
+	fmt.Println("  [1] Accept and proceed to planning")
+	fmt.Println("  [2] Interview more (continue gathering requirements)")
+	fmt.Print("  > ")
+
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return ApprovalAccept
+	}
+
+	line = strings.TrimSpace(line)
+	if line == "2" {
+		return ApprovalInterviewMore
+	}
+
+	return ApprovalAccept
+}
+
+// buildChatPrompt creates a prompt for answering questions about the requirements.
+func buildChatPrompt(requirements, question string, stackInfo detect.StackInfo, graphSummary string) string {
+	var sb strings.Builder
+
+	sb.WriteString("You are helping a developer understand a requirements document.\n\n")
+
+	sb.WriteString("=== Requirements ===\n")
+	sb.WriteString(requirements)
+	sb.WriteString("\n\n")
+
+	if stackInfo.Language != "" || stackInfo.Framework != "" {
+		sb.WriteString("=== Project Context ===\n")
+		if stackInfo.Language != "" {
+			sb.WriteString("Language: ")
+			sb.WriteString(stackInfo.Language)
+			sb.WriteString("\n")
+		}
+		if stackInfo.Framework != "" {
+			sb.WriteString("Framework: ")
+			sb.WriteString(stackInfo.Framework)
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
+
+	if graphSummary != "" {
+		sb.WriteString("=== Codebase Summary ===\n")
+		sb.WriteString(graphSummary)
+		sb.WriteString("\n\n")
+	}
+
+	sb.WriteString("=== User Question ===\n")
+	sb.WriteString(question)
+	sb.WriteString("\n\n")
+
+	sb.WriteString("Answer concisely and helpfully. Return ONLY plain text, no JSON.")
+
+	return sb.String()
+}
+
+// approvalChoiceString returns a human-readable string for the approval choice.
+func approvalChoiceString(choice ApprovalChoice) string {
+	switch choice {
+	case ApprovalAccept:
+		return "accept"
+	case ApprovalInterviewMore:
+		return "interview_more"
+	case ApprovalChat:
+		return "chat"
+	default:
+		return "unknown"
+	}
+}
+
+// logApprovalChoice logs the user's requirements approval choice for audit.
+func logApprovalChoice(logger *log.Logger, choice ApprovalChoice, title string) {
+	if logger == nil {
+		return
+	}
+	_ = logger.Append(log.LogEvent{
+		Event:  log.EventRequirementsApproval,
+		Title:  title,
+		Choice: approvalChoiceString(choice),
+	})
 }
 
 // writeRequirements creates the run directory if needed and writes the
