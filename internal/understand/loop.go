@@ -161,7 +161,37 @@ func runInterviewLoop(cfg config.Config, stackInfo detect.StackInfo, description
 				continue
 
 			case ApprovalChat:
-				chatChoice := runChatLoop(reqs.Content, stackInfo, graphSummary)
+				chatChoice, chatMessages := runChatLoop(reqs.Content, stackInfo, graphSummary)
+
+				// If there were chat messages, regenerate requirements with chat content.
+				if len(chatMessages) > 0 {
+					fmt.Println("\nUpdating requirements with chat discussion...")
+					updatedContent, err := regenerateRequirementsWithChat(reqs.Content, chatMessages, stackInfo, graphSummary)
+					if err != nil {
+						fmt.Printf("  (Warning: could not incorporate chat: %v)\n", err)
+					} else {
+						reqs.Content = updatedContent
+						reqs.Title = extractTitle(updatedContent)
+						if err := writeRequirements(runDir, updatedContent); err != nil {
+							fmt.Printf("  (Warning: could not update requirements file: %v)\n", err)
+						}
+
+						// Show updated requirements summary.
+						fmt.Println()
+						fmt.Println("=== Updated Requirements Summary ===")
+						fmt.Println()
+						lines := strings.Split(updatedContent, "\n")
+						previewLines := lines
+						if len(lines) > 20 {
+							previewLines = lines[:20]
+							fmt.Println(strings.Join(previewLines, "\n"))
+							fmt.Println("  ... (truncated, see full requirements.md)")
+						} else {
+							fmt.Println(strings.Join(previewLines, "\n"))
+						}
+					}
+				}
+
 				// Log the post-chat choice.
 				logApprovalChoice(logger, chatChoice, reqs.Title)
 				if chatChoice == ApprovalAccept {
@@ -254,6 +284,12 @@ const (
 	ApprovalChat
 )
 
+// ChatMessage represents a single message in the chat conversation.
+type ChatMessage struct {
+	Role    string // "user" or "assistant"
+	Content string
+}
+
 // finalize writes the requirements markdown to disk, presents the approval
 // gate, and returns the Requirements struct only if approved.
 func finalize(resp UnderstandResponse, runDir string) (*Requirements, error) {
@@ -329,9 +365,11 @@ func presentApprovalGate(content string) ApprovalChoice {
 }
 
 // runChatLoop allows the user to have a conversation about the plan before
-// deciding to accept or continue interviewing.
-func runChatLoop(content string, stackInfo detect.StackInfo, graphSummary string) ApprovalChoice {
+// deciding to accept or continue interviewing. It returns both the user's
+// choice and the captured chat messages for incorporation into requirements.
+func runChatLoop(content string, stackInfo detect.StackInfo, graphSummary string) (ApprovalChoice, []ChatMessage) {
 	reader := bufio.NewReader(os.Stdin)
+	var messages []ChatMessage
 
 	fmt.Println()
 	fmt.Println("=== Chat Mode ===")
@@ -355,6 +393,9 @@ func runChatLoop(content string, stackInfo detect.StackInfo, graphSummary string
 			continue
 		}
 
+		// Capture user message.
+		messages = append(messages, ChatMessage{Role: "user", Content: line})
+
 		// Build a prompt to answer the user's question.
 		prompt := buildChatPrompt(content, line, stackInfo, graphSummary)
 		response, err := spawnClaude(prompt)
@@ -362,6 +403,9 @@ func runChatLoop(content string, stackInfo detect.StackInfo, graphSummary string
 			fmt.Printf("  (Error getting response: %v)\n", err)
 			continue
 		}
+
+		// Capture assistant response.
+		messages = append(messages, ChatMessage{Role: "assistant", Content: response})
 
 		fmt.Println()
 		fmt.Printf("Claude: %s\n", response)
@@ -377,15 +421,46 @@ func runChatLoop(content string, stackInfo detect.StackInfo, graphSummary string
 
 	line, err := reader.ReadString('\n')
 	if err != nil {
-		return ApprovalAccept
+		return ApprovalAccept, messages
 	}
 
 	line = strings.TrimSpace(line)
 	if line == "2" {
-		return ApprovalInterviewMore
+		return ApprovalInterviewMore, messages
 	}
 
-	return ApprovalAccept
+	return ApprovalAccept, messages
+}
+
+// regenerateRequirementsWithChat takes the original requirements and chat messages
+// and spawns Claude to incorporate the chat discussion into updated requirements.
+func regenerateRequirementsWithChat(originalReqs string, chatMessages []ChatMessage, stackInfo detect.StackInfo, graphSummary string) (string, error) {
+	prompt := BuildRegeneratePrompt(originalReqs, chatMessages, stackInfo, graphSummary)
+	output, err := spawnClaude(prompt)
+	if err != nil {
+		return "", fmt.Errorf("regenerating requirements: %w", err)
+	}
+
+	// The output should be pure markdown, but clean it up just in case.
+	output = strings.TrimSpace(output)
+
+	// If Claude wrapped output in markdown fences, strip them.
+	if strings.HasPrefix(output, "```markdown") {
+		output = strings.TrimPrefix(output, "```markdown")
+		output = strings.TrimSuffix(output, "```")
+		output = strings.TrimSpace(output)
+	} else if strings.HasPrefix(output, "```") {
+		output = strings.TrimPrefix(output, "```")
+		output = strings.TrimSuffix(output, "```")
+		output = strings.TrimSpace(output)
+	}
+
+	// Validate that output looks like a requirements doc (has a heading).
+	if !strings.Contains(output, "#") {
+		return "", fmt.Errorf("regenerated requirements missing expected markdown structure")
+	}
+
+	return output, nil
 }
 
 // buildChatPrompt creates a prompt for answering questions about the requirements.

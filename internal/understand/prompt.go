@@ -142,3 +142,52 @@ If you have enough information, respond with:
 }
 
 IMPORTANT: The "requirements_md" field must be a complete markdown document suitable for driving a planning phase. Include all decisions made during the interview.`
+
+// BuildRegeneratePrompt creates a prompt to incorporate chat discussion into requirements.
+func BuildRegeneratePrompt(originalReqs string, chatMessages []ChatMessage, stackInfo detect.StackInfo, graphSummary string) string {
+	var sb strings.Builder
+
+	sb.WriteString("You are updating a requirements document based on a follow-up chat discussion.\n\n")
+
+	sb.WriteString("## Original Requirements\n")
+	sb.WriteString(originalReqs)
+	sb.WriteString("\n\n")
+
+	sb.WriteString("## Chat Discussion\n")
+	for _, msg := range chatMessages {
+		if msg.Role == "user" {
+			sb.WriteString("User: ")
+		} else {
+			sb.WriteString("Assistant: ")
+		}
+		sb.WriteString(msg.Content)
+		sb.WriteString("\n\n")
+	}
+
+	if stackInfo.Language != "" || stackInfo.Framework != "" {
+		sb.WriteString("## Project Context\n")
+		sb.WriteString(formatStackInfo(stackInfo))
+		sb.WriteString("\n\n")
+	}
+
+	if graphSummary != "" {
+		sb.WriteString("## Codebase Context\n")
+		sb.WriteString(graphSummary)
+		sb.WriteString("\n\n")
+	}
+
+	sb.WriteString(`## Task
+Incorporate any new features, changes, or clarifications from the chat into the requirements document.
+
+Rules:
+1. Preserve the original structure (Overview/Decisions, Scope, Out of Scope, Technical Approach, Acceptance Criteria)
+2. Add new items to the appropriate sections based on the chat discussion
+3. Do NOT remove anything from the original unless the chat explicitly requested removal
+4. If the chat discussed implementation details, add them to Technical Approach
+5. If new features were discussed, add them to Scope and Acceptance Criteria
+6. Keep the same formatting style as the original document
+
+Output ONLY the updated requirements markdown, no explanation or commentary.`)
+
+	return sb.String()
+}
