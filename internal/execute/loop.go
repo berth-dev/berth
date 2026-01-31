@@ -40,12 +40,13 @@ type ExecuteState struct {
 // retry loop until all beads are completed, stuck, or skipped.
 // If parallel mode is active, delegates to RunExecuteParallel.
 func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName string, verbose bool) error {
-	return RunExecuteWithState(cfg, projectRoot, runDir, branchName, verbose, nil)
+	return RunExecuteWithState(cfg, projectRoot, runDir, branchName, verbose, nil, nil)
 }
 
 // RunExecuteWithState is the main execution entry point that accepts optional
 // restored state from a checkpoint. Used by resume to restore execution state.
-func RunExecuteWithState(cfg config.Config, projectRoot string, runDir string, branchName string, verbose bool, state *ExecuteState) error {
+// The outputChan parameter is optional and receives StreamEvents during execution for TUI integration.
+func RunExecuteWithState(cfg config.Config, projectRoot string, runDir string, branchName string, verbose bool, state *ExecuteState, outputChan chan<- StreamEvent) error {
 	// Check if parallel execution is appropriate (full parallel mode).
 	allBeadsList, err := beads.List()
 	if err != nil {
@@ -141,13 +142,18 @@ func RunExecuteWithState(cfg config.Config, projectRoot string, runDir string, b
 
 	// 9. Main loop: process beads group by group.
 	for _, group := range groups {
+		// Send group_start event to TUI.
+		if outputChan != nil {
+			outputChan <- StreamEvent{Type: "group_start", Content: fmt.Sprintf("Group %d", group.Index)}
+		}
+
 		// Check if this group should run in parallel.
 		if shouldRunParallel(group, &cfg) {
 			// Parallel execution for this group.
 			if err := executeGroupParallel(
 				&cfg, group, allBeads, pool, projectRoot, branchName, runDir,
 				kgClient, logger, systemPrompt, verbose,
-				&completedBeads, &failedBeads, retryCount, breaker,
+				&completedBeads, &failedBeads, retryCount, breaker, outputChan,
 			); err != nil {
 				return err
 			}
@@ -156,7 +162,7 @@ func RunExecuteWithState(cfg config.Config, projectRoot string, runDir string, b
 			if err := executeGroupSequential(
 				&cfg, group, allBeads, pool, projectRoot, branchName, runDir,
 				kgClient, logger, systemPrompt, verbose,
-				&completedBeads, &failedBeads, retryCount, breaker,
+				&completedBeads, &failedBeads, retryCount, breaker, outputChan,
 			); err != nil {
 				return err
 			}
@@ -186,6 +192,14 @@ func RunExecuteWithState(cfg config.Config, projectRoot string, runDir string, b
 
 	fmt.Printf("Execution complete: %d completed, %d stuck, %d skipped out of %d total\n",
 		pool.Completed, pool.Stuck, pool.Skipped, pool.Total)
+
+	// Send execution_complete event to TUI.
+	if outputChan != nil {
+		outputChan <- StreamEvent{
+			Type:    "execution_complete",
+			Content: fmt.Sprintf("%d completed, %d stuck, %d skipped", pool.Completed, pool.Stuck, pool.Skipped),
+		}
+	}
 
 	return nil
 }
@@ -238,6 +252,7 @@ func executeGroupParallel(
 	failedBeads *[]string,
 	retryCount map[string]int,
 	breaker *CircuitBreaker,
+	outputChan chan<- StreamEvent,
 ) error {
 	fmt.Printf("Executing group %d with %d beads in parallel\n", group.Index, len(group.BeadIDs))
 
@@ -259,12 +274,18 @@ func executeGroupParallel(
 			fmt.Fprintf(os.Stderr, "Warning: failed to log task_started: %v\n", logErr)
 		}
 		fmt.Printf("%s %s: %s (parallel)...\n", pool.Progress(), beadID, bead.Title)
+
+		// Send bead_init event to TUI.
+		if outputChan != nil {
+			outputChan <- StreamEvent{Type: "bead_init", BeadID: beadID}
+		}
 	}
 
 	// Create context for parallel execution.
 	ctx := context.Background()
 
 	// Run all beads in the group in parallel.
+	// Note: RunParallel uses OutputEvent for streaming; the outputChan here is for higher-level events.
 	results := RunParallel(ctx, group, projectRoot, cfg, kgClient, systemPrompt, nil)
 
 	// Merge results into the target branch.
@@ -322,6 +343,11 @@ func executeGroupParallel(
 			*completedBeads = append(*completedBeads, result.BeadID)
 			breaker.RecordSuccess()
 
+			// Send bead_complete event to TUI.
+			if outputChan != nil {
+				outputChan <- StreamEvent{Type: "bead_complete", BeadID: result.BeadID}
+			}
+
 			// Collect files for reindexing.
 			for _, f := range bead.Files {
 				if !seenFiles[f] {
@@ -344,6 +370,12 @@ func executeGroupParallel(
 				if result.Error != nil {
 					errMsg = result.Error.Error()
 				}
+
+				// Send error event to TUI.
+				if outputChan != nil {
+					outputChan <- StreamEvent{Type: "error", BeadID: result.BeadID, Content: errMsg}
+				}
+
 				action, stuckErr := HandleStuck(*cfg, bead, nil, errMsg, "", projectRoot)
 				if stuckErr != nil {
 					fmt.Fprintf(os.Stderr, "Error handling stuck bead %s: %v\n", result.BeadID, stuckErr)
@@ -364,6 +396,11 @@ func executeGroupParallel(
 					pool.RecordCompletion()
 					*completedBeads = append(*completedBeads, result.BeadID)
 					breaker.RecordSuccess()
+
+					// Send bead_complete event for rescued beads.
+					if outputChan != nil {
+						outputChan <- StreamEvent{Type: "bead_complete", BeadID: result.BeadID}
+					}
 				default:
 					pool.RecordStuck()
 					*failedBeads = append(*failedBeads, result.BeadID)
@@ -421,6 +458,7 @@ func executeGroupSequential(
 	failedBeads *[]string,
 	retryCount map[string]int,
 	breaker *CircuitBreaker,
+	outputChan chan<- StreamEvent,
 ) error {
 	for _, beadID := range group.BeadIDs {
 		task := GetBeadByID(allBeads, beadID)
@@ -460,6 +498,11 @@ func executeGroupSequential(
 			fmt.Fprintf(os.Stderr, "Warning: failed to log task_started: %v\n", logErr)
 		}
 
+		// Send bead_init event to TUI.
+		if outputChan != nil {
+			outputChan <- StreamEvent{Type: "bead_init", BeadID: task.ID}
+		}
+
 		// Print progress.
 		fmt.Printf("%s %s: %s (attempt 1)...\n", pool.Progress(), task.ID, task.Title)
 
@@ -467,7 +510,11 @@ func executeGroupSequential(
 		graphData := preEmbedGraphData(kgClient, task.Files)
 
 		// Execute with retry logic.
-		opts := &SpawnClaudeOpts{Verbose: verbose}
+		opts := &SpawnClaudeOpts{
+			Verbose:    verbose,
+			OutputChan: outputChan,
+			BeadID:     task.ID,
+		}
 		beadResult, retryErr := RetryBead(*cfg, task, graphData, projectRoot, logger, kgClient, opts)
 		if retryErr != nil {
 			fmt.Fprintf(os.Stderr, "Error during bead %s execution: %v\n", task.ID, retryErr)
@@ -489,8 +536,23 @@ func executeGroupSequential(
 			pool.RecordCompletion()
 			*completedBeads = append(*completedBeads, task.ID)
 			breaker.RecordSuccess()
+
+			// Send bead_complete event to TUI.
+			if outputChan != nil {
+				outputChan <- StreamEvent{Type: "bead_complete", BeadID: task.ID}
+			}
 		} else {
 			// Bead failed all retries: enter stuck handling.
+			var errMsg string
+			if retryErr != nil {
+				errMsg = retryErr.Error()
+			}
+
+			// Send error event to TUI.
+			if outputChan != nil {
+				outputChan <- StreamEvent{Type: "error", BeadID: task.ID, Content: errMsg}
+			}
+
 			action, stuckErr := HandleStuck(*cfg, task, nil, "", graphData, projectRoot)
 			if stuckErr != nil {
 				fmt.Fprintf(os.Stderr, "Error handling stuck bead %s: %v\n", task.ID, stuckErr)
@@ -519,6 +581,11 @@ func executeGroupSequential(
 				pool.RecordCompletion()
 				*completedBeads = append(*completedBeads, task.ID)
 				breaker.RecordSuccess()
+
+				// Send bead_complete event for rescued beads.
+				if outputChan != nil {
+					outputChan <- StreamEvent{Type: "bead_complete", BeadID: task.ID}
+				}
 			case stuckActionHint:
 				if err := onBeadSuccess(task, kgClient, projectRoot, logger, systemPrompt); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: post-hint steps failed for bead %s: %v\n", task.ID, err)
@@ -526,6 +593,11 @@ func executeGroupSequential(
 				pool.RecordCompletion()
 				*completedBeads = append(*completedBeads, task.ID)
 				breaker.RecordSuccess()
+
+				// Send bead_complete event for hint-resolved beads.
+				if outputChan != nil {
+					outputChan <- StreamEvent{Type: "bead_complete", BeadID: task.ID}
+				}
 			default:
 				pool.RecordStuck()
 				*failedBeads = append(*failedBeads, task.ID)
