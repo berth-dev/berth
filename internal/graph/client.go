@@ -9,6 +9,7 @@ import (
 	"io"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -134,8 +135,8 @@ type Client struct {
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
 	stdout  *bufio.Scanner
-	mu      sync.Mutex
-	nextID  int
+	mu      sync.RWMutex
+	nextID  atomic.Int64
 	timeout time.Duration
 }
 
@@ -162,13 +163,14 @@ func NewClient(cmd *exec.Cmd, timeout time.Duration) (*Client, error) {
 	// Allow up to 10 MB per line for large JSON responses.
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 
-	return &Client{
+	client := &Client{
 		cmd:     cmd,
 		stdin:   stdinPipe,
 		stdout:  scanner,
-		nextID:  1,
 		timeout: timeout,
-	}, nil
+	}
+	client.nextID.Store(1)
+	return client, nil
 }
 
 // Close shuts down the MCP process gracefully.
@@ -185,14 +187,25 @@ func (c *Client) Close() error {
 	return c.cmd.Wait()
 }
 
-// callTool sends a JSON-RPC tools/call request and unmarshals the response
-// into result. It is thread-safe via c.mu.
-func (c *Client) callTool(name string, args map[string]any, result any) error {
+// callToolRead sends a JSON-RPC tools/call request for read-only operations
+// and unmarshals the response into result. Uses RLock to allow concurrent reads.
+func (c *Client) callToolRead(name string, args map[string]any, result any) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.callToolLocked(name, args, result)
+}
+
+// callToolWrite sends a JSON-RPC tools/call request for write operations
+// and unmarshals the response into result. Uses exclusive Lock.
+func (c *Client) callToolWrite(name string, args map[string]any, result any) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.callToolLocked(name, args, result)
+}
 
-	id := c.nextID
-	c.nextID++
+// callToolLocked performs the actual JSON-RPC call. Caller must hold the lock.
+func (c *Client) callToolLocked(name string, args map[string]any, result any) error {
+	id := int(c.nextID.Add(1))
 
 	req := mcpRequest{
 		JSONRPC: "2.0",
@@ -274,42 +287,42 @@ func (c *Client) callTool(name string, args map[string]any, result any) error {
 // QueryCallers returns all callers of the named function.
 func (c *Client) QueryCallers(name string) ([]CallerResult, error) {
 	var results []CallerResult
-	err := c.callTool("get_callers", map[string]any{"symbol_name": name}, &results)
+	err := c.callToolRead("get_callers", map[string]any{"symbol_name": name}, &results)
 	return results, err
 }
 
 // QueryCallees returns all functions called by the named function.
 func (c *Client) QueryCallees(name string) ([]CalleeResult, error) {
 	var results []CalleeResult
-	err := c.callTool("get_callees", map[string]any{"symbol_name": name}, &results)
+	err := c.callToolRead("get_callees", map[string]any{"symbol_name": name}, &results)
 	return results, err
 }
 
 // QueryDependents returns all files dependent on the specified file.
 func (c *Client) QueryDependents(filePath string) ([]DependentResult, error) {
 	var results []DependentResult
-	err := c.callTool("get_dependents", map[string]any{"file_path": filePath}, &results)
+	err := c.callToolRead("get_dependents", map[string]any{"file_path": filePath}, &results)
 	return results, err
 }
 
 // QueryExports returns all exported symbols from the specified file.
 func (c *Client) QueryExports(file string) ([]ExportResult, error) {
 	var results []ExportResult
-	err := c.callTool("get_exports", map[string]any{"file_path": file}, &results)
+	err := c.callToolRead("get_exports", map[string]any{"file_path": file}, &results)
 	return results, err
 }
 
 // QueryImporters returns all files that import from the specified file.
 func (c *Client) QueryImporters(file string) ([]ImporterResult, error) {
 	var results []ImporterResult
-	err := c.callTool("get_importers", map[string]any{"file_path": file}, &results)
+	err := c.callToolRead("get_importers", map[string]any{"file_path": file}, &results)
 	return results, err
 }
 
 // QueryTypeUsages returns all locations where the named type is used.
 func (c *Client) QueryTypeUsages(typeName string) ([]TypeUsageResult, error) {
 	var results []TypeUsageResult
-	err := c.callTool("get_type_usages", map[string]any{"type_name": typeName}, &results)
+	err := c.callToolRead("get_type_usages", map[string]any{"type_name": typeName}, &results)
 	return results, err
 }
 
@@ -317,7 +330,7 @@ func (c *Client) QueryTypeUsages(typeName string) ([]TypeUsageResult, error) {
 // including exports and importers.
 func (c *Client) UnderstandFile(file string) (*FileUnderstanding, error) {
 	var result FileUnderstanding
-	err := c.callTool("understand_file", map[string]any{"file_path": file}, &result)
+	err := c.callToolRead("understand_file", map[string]any{"file_path": file}, &result)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +340,7 @@ func (c *Client) UnderstandFile(file string) (*FileUnderstanding, error) {
 // AnalyzeImpact returns the impact analysis for changes to the specified file.
 func (c *Client) AnalyzeImpact(filePath string) (*ImpactAnalysis, error) {
 	var result ImpactAnalysis
-	err := c.callTool("analyze_impact", map[string]any{"file_path": filePath}, &result)
+	err := c.callToolRead("analyze_impact", map[string]any{"file_path": filePath}, &result)
 	if err != nil {
 		return nil, err
 	}
@@ -336,10 +349,10 @@ func (c *Client) AnalyzeImpact(filePath string) (*ImpactAnalysis, error) {
 
 // ReindexFiles triggers reindexing of the specified files in the KG.
 func (c *Client) ReindexFiles(files []string) error {
-	return c.callTool("reindex_files", map[string]any{"file_paths": files}, nil)
+	return c.callToolWrite("reindex_files", map[string]any{"file_paths": files}, nil)
 }
 
 // FullReindex triggers a full reindex of the entire project.
 func (c *Client) FullReindex() error {
-	return c.callTool("reindex", nil, nil)
+	return c.callToolWrite("reindex", nil, nil)
 }
