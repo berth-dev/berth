@@ -90,6 +90,14 @@ type ImpactAnalysis struct {
 	AffectedTests        []string               `json:"affected_tests"`
 }
 
+// ArchitectureNode represents a file in the architecture diagram.
+type ArchitectureNode struct {
+	File    string
+	Exports []string
+	Imports []string
+	Depth   int
+}
+
 // mcpRequest is a JSON-RPC 2.0 request.
 type mcpRequest struct {
 	JSONRPC string `json:"jsonrpc"`
@@ -355,4 +363,64 @@ func (c *Client) ReindexFiles(files []string) error {
 // FullReindex triggers a full reindex of the entire project.
 func (c *Client) FullReindex() error {
 	return c.callToolWrite("reindex", nil, nil)
+}
+
+// GetArchitectureDiagram builds a layered dependency view from a root file.
+func (c *Client) GetArchitectureDiagram(rootFile string, maxDepth int) (map[string]ArchitectureNode, error) {
+	nodes := make(map[string]ArchitectureNode)
+
+	// BFS from root file
+	queue := []string{rootFile}
+	depths := map[string]int{rootFile: 0}
+
+	for len(queue) > 0 {
+		file := queue[0]
+		queue = queue[1:]
+		depth := depths[file]
+
+		if depth > maxDepth {
+			continue
+		}
+
+		// Get exports
+		exports, err := c.QueryExports(file)
+		if err != nil {
+			continue // skip on error
+		}
+
+		// Get importers
+		importers, err := c.QueryImporters(file)
+		if err != nil {
+			continue // skip on error
+		}
+
+		// Build export names list
+		exportNames := make([]string, len(exports))
+		for i, exp := range exports {
+			exportNames[i] = exp.Name
+		}
+
+		// Build importer files list
+		importerFiles := make([]string, len(importers))
+		for i, imp := range importers {
+			importerFiles[i] = imp.File
+		}
+
+		nodes[file] = ArchitectureNode{
+			File:    file,
+			Exports: exportNames,
+			Imports: importerFiles,
+			Depth:   depth,
+		}
+
+		// Add importers to queue
+		for _, imp := range importers {
+			if _, seen := depths[imp.File]; !seen {
+				depths[imp.File] = depth + 1
+				queue = append(queue, imp.File)
+			}
+		}
+	}
+
+	return nodes, nil
 }
