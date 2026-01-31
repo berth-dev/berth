@@ -1,0 +1,572 @@
+// Package app provides the main TUI application that wires all views together.
+package app
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/berth-dev/berth/internal/config"
+	"github.com/berth-dev/berth/internal/tui"
+	"github.com/berth-dev/berth/internal/tui/views"
+)
+
+// App is the main TUI application that wires all views together.
+type App struct {
+	model *tui.Model
+
+	// View models
+	homeView      views.HomeModel
+	interviewView views.InterviewModel
+	chatView      views.ChatModel
+	planView      views.PlanModel
+	executionView views.ExecutionModel
+	dashboardView views.DashboardModel
+}
+
+// New creates a new App with the given configuration.
+func New(cfg *config.Config, projectRoot string) *App {
+	model := tui.NewModel(cfg, projectRoot)
+
+	return &App{
+		model:    model,
+		homeView: views.NewHomeModel(nil, model.Width, model.Height),
+	}
+}
+
+// Init returns the initial command for the TUI.
+func (a *App) Init() tea.Cmd {
+	return a.homeView.Init()
+}
+
+// Update handles messages and updates the application state.
+func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		a.model.Width = msg.Width
+		a.model.Height = msg.Height
+		// Propagate to all views
+		a.homeView, _ = a.homeView.Update(msg)
+		a.interviewView, _ = a.interviewView.Update(msg)
+		a.chatView, _ = a.chatView.Update(msg)
+		a.planView, _ = a.planView.Update(msg)
+		a.executionView, _ = a.executionView.Update(msg)
+		a.dashboardView, _ = a.dashboardView.Update(msg)
+		return a, nil
+
+	case tea.KeyMsg:
+		switch msg.String() {
+		case tui.KeyCtrlC:
+			return a, tea.Quit
+
+		case tui.KeyTab:
+			// Cycle through tabs when not in focused input
+			if !a.isInputFocused() {
+				a.cycleTab()
+				return a, nil
+			}
+		}
+	}
+
+	// Route messages based on current state
+	switch a.model.State {
+	case tui.StateHome:
+		return a.updateHome(msg)
+
+	case tui.StateAnalyzing:
+		return a.updateAnalyzing(msg)
+
+	case tui.StateInterview:
+		return a.updateInterview(msg)
+
+	case tui.StateChat:
+		return a.updateChat(msg)
+
+	case tui.StateApproval:
+		return a.updateApproval(msg)
+
+	case tui.StateExecuting:
+		return a.updateExecuting(msg)
+
+	case tui.StateDashboard:
+		return a.updateDashboard(msg)
+
+	case tui.StateComplete:
+		// Handle any key to exit
+		if _, ok := msg.(tea.KeyMsg); ok {
+			return a, tea.Quit
+		}
+	}
+
+	return a, tea.Batch(cmds...)
+}
+
+// View renders the current application state.
+func (a *App) View() string {
+	var content string
+
+	switch a.model.State {
+	case tui.StateHome:
+		content = a.homeView.View()
+
+	case tui.StateAnalyzing:
+		content = a.renderAnalyzingView()
+
+	case tui.StateInterview:
+		content = a.interviewView.View()
+
+	case tui.StateChat:
+		content = a.chatView.View()
+
+	case tui.StateApproval:
+		content = a.planView.View()
+
+	case tui.StateExecuting:
+		content = a.executionView.View()
+
+	case tui.StateDashboard:
+		content = a.dashboardView.View()
+
+	case tui.StateComplete:
+		content = a.renderCompleteView()
+
+	default:
+		content = "Unknown state"
+	}
+
+	// Add tab bar at bottom for applicable states
+	if a.shouldShowTabBar() {
+		tabBar := a.renderTabBar(a.model.ActiveTab)
+		content = content + "\n" + tabBar
+	}
+
+	return content
+}
+
+// ============================================================================
+// State Update Handlers
+// ============================================================================
+
+func (a *App) updateHome(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	a.homeView, cmd = a.homeView.Update(msg)
+
+	// Handle messages from home view
+	switch msg := msg.(type) {
+	case views.SubmitTaskMsg:
+		return a, a.transitionToAnalyzing(msg.Description)
+
+	case views.ResumeSessionMsg:
+		// TODO: Load session and resume from appropriate state
+		_ = msg.SessionID
+		return a, nil
+	}
+
+	return a, cmd
+}
+
+func (a *App) updateAnalyzing(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case spinner.TickMsg:
+		a.model.Spinner, cmd = a.model.Spinner.Update(msg)
+		return a, cmd
+
+	case tui.AnalysisCompleteMsg:
+		a.transitionToInterview(msg.Questions)
+		return a, a.interviewView.Init()
+	}
+
+	return a, nil
+}
+
+func (a *App) updateInterview(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	a.interviewView, cmd = a.interviewView.Update(msg)
+
+	switch msg := msg.(type) {
+	case tui.AnswerMsg:
+		// Store answer and move to next question
+		a.model.Answers = append(a.model.Answers, tui.Answer{
+			ID:    msg.QuestionID,
+			Value: msg.Value,
+		})
+		a.model.CurrentQ++
+
+		// Check if more questions
+		if a.model.CurrentQ < len(a.model.Questions) {
+			a.interviewView = views.NewInterviewModel(
+				a.model.Questions[a.model.CurrentQ],
+				a.model.Width,
+				a.model.Height,
+			)
+			return a, a.interviewView.Init()
+		}
+		// All questions answered, transition to planning
+		// TODO: Generate plan from answers
+		return a, nil
+
+	case tui.EnterChatMsg:
+		// Transition to chat mode for this question
+		a.model.State = tui.StateChat
+		a.chatView = views.NewChatModel(
+			msg.QuestionID,
+			a.model.ChatHistory,
+			a.model.Width,
+			a.model.Height,
+		)
+		return a, a.chatView.Init()
+
+	case tui.SkipInterviewMsg:
+		// Skip remaining questions and go to planning
+		// TODO: Generate plan
+		return a, nil
+	}
+
+	return a, cmd
+}
+
+func (a *App) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	a.chatView, cmd = a.chatView.Update(msg)
+
+	switch msg := msg.(type) {
+	case views.SendChatMsg:
+		// TODO: Send message to Claude and get response
+		_ = msg.Content
+		return a, cmd
+
+	case views.ExitChatMsg:
+		// Return to previous state (interview or execution)
+		if a.model.InChatMode {
+			a.model.State = tui.StateInterview
+		}
+		return a, nil
+	}
+
+	return a, cmd
+}
+
+func (a *App) updateApproval(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	a.planView, cmd = a.planView.Update(msg)
+
+	switch msg := msg.(type) {
+	case tui.ApproveMsg:
+		// Transition to execution
+		beads := make([]tui.BeadState, len(a.model.Plan.Beads))
+		for i, b := range a.model.Plan.Beads {
+			beads[i] = tui.BeadState{
+				ID:        b.ID,
+				Title:     b.Title,
+				Status:    "pending",
+				BlockedBy: b.DependsOn,
+			}
+		}
+		a.transitionToExecuting(beads)
+		return a, a.executionView.Init()
+
+	case tui.RejectMsg:
+		// TODO: Handle plan rejection with feedback
+		_ = msg.Feedback
+		return a, nil
+	}
+
+	return a, cmd
+}
+
+func (a *App) updateExecuting(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	a.executionView, cmd = a.executionView.Update(msg)
+
+	switch msg := msg.(type) {
+	case tui.PauseMsg:
+		a.model.IsPaused = msg.Paused
+		return a, cmd
+
+	case tui.SkipBeadMsg:
+		// Mark bead as skipped and continue
+		for i := range a.model.Beads {
+			if a.model.Beads[i].ID == msg.BeadID {
+				a.model.Beads[i].Status = "skipped"
+				break
+			}
+		}
+		return a, cmd
+
+	case tui.BeadCompleteMsg:
+		// Check if all beads are done
+		allDone := true
+		for _, bead := range a.model.Beads {
+			if bead.Status == "pending" || bead.Status == "running" {
+				allDone = false
+				break
+			}
+		}
+		if allDone {
+			a.transitionToComplete()
+		}
+		return a, cmd
+	}
+
+	return a, cmd
+}
+
+func (a *App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	a.dashboardView, cmd = a.dashboardView.Update(msg)
+
+	switch msg := msg.(type) {
+	case views.LoadSessionMsg:
+		// TODO: Load session and resume
+		_ = msg.SessionID
+		return a, nil
+	}
+
+	return a, cmd
+}
+
+// ============================================================================
+// State Transitions
+// ============================================================================
+
+// transitionToAnalyzing initiates the analysis phase.
+func (a *App) transitionToAnalyzing(description string) tea.Cmd {
+	a.model.State = tui.StateAnalyzing
+
+	// Add initial system message
+	a.model.ChatHistory = append(a.model.ChatHistory, tui.ChatMessage{
+		Role:    "system",
+		Content: fmt.Sprintf("Task: %s", description),
+	})
+
+	// Start spinner
+	return a.model.Spinner.Tick
+}
+
+// transitionToInterview sets up the interview phase with questions.
+func (a *App) transitionToInterview(questions []tui.Question) {
+	a.model.State = tui.StateInterview
+	a.model.Questions = questions
+	a.model.CurrentQ = 0
+
+	if len(questions) > 0 {
+		a.interviewView = views.NewInterviewModel(
+			questions[0],
+			a.model.Width,
+			a.model.Height,
+		)
+	}
+}
+
+// TransitionToApproval sets up the plan approval phase.
+func (a *App) TransitionToApproval(plan *tui.Plan, groups []tui.ExecutionGroup) {
+	a.model.State = tui.StateApproval
+	a.model.Plan = plan
+	a.model.Groups = groups
+
+	a.planView = views.NewPlanModel(
+		plan,
+		groups,
+		a.model.Width,
+		a.model.Height,
+	)
+}
+
+// transitionToExecuting sets up the bead execution phase.
+func (a *App) transitionToExecuting(beads []tui.BeadState) {
+	a.model.State = tui.StateExecuting
+	a.model.Beads = beads
+	a.model.CurrentBead = 0
+
+	a.executionView = views.NewExecutionModel(
+		beads,
+		false, // parallel mode determined by config
+		a.model.Width,
+		a.model.Height,
+	)
+}
+
+// transitionToComplete marks the session as complete.
+func (a *App) transitionToComplete() {
+	a.model.State = tui.StateComplete
+}
+
+// ============================================================================
+// Helper Methods
+// ============================================================================
+
+// isInputFocused returns true if the current view has a focused text input.
+func (a *App) isInputFocused() bool {
+	switch a.model.State {
+	case tui.StateHome, tui.StateChat:
+		return true
+	default:
+		return false
+	}
+}
+
+// cycleTab cycles through available tabs.
+func (a *App) cycleTab() {
+	switch a.model.ActiveTab {
+	case tui.TabChat:
+		a.model.ActiveTab = tui.TabDashboard
+		a.model.State = tui.StateDashboard
+		a.dashboardView = views.NewDashboardModel(
+			a.model.Diagram,
+			a.model.Learnings,
+			a.model.Sessions,
+			a.model.Width,
+			a.model.Height,
+		)
+	case tui.TabDashboard:
+		a.model.ActiveTab = tui.TabSessions
+	case tui.TabSessions:
+		a.model.ActiveTab = tui.TabChat
+		a.model.State = tui.StateHome
+	}
+}
+
+// shouldShowTabBar returns true if the tab bar should be displayed.
+func (a *App) shouldShowTabBar() bool {
+	switch a.model.State {
+	case tui.StateHome, tui.StateDashboard:
+		return true
+	default:
+		return false
+	}
+}
+
+// renderTabBar renders the tab bar with the active tab highlighted.
+func (a *App) renderTabBar(activeTab tui.Tab) string {
+	tabs := []struct {
+		name string
+		tab  tui.Tab
+	}{
+		{"Chat", tui.TabChat},
+		{"Dashboard", tui.TabDashboard},
+		{"Sessions", tui.TabSessions},
+	}
+
+	var rendered []string
+	for _, t := range tabs {
+		if t.tab == activeTab {
+			rendered = append(rendered, tui.ActiveTabStyle.Render(t.name))
+		} else {
+			rendered = append(rendered, tui.InactiveTabStyle.Render(t.name))
+		}
+	}
+
+	tabBar := lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
+	return lipgloss.NewStyle().
+		Width(a.model.Width).
+		Align(lipgloss.Center).
+		Render(tabBar)
+}
+
+// renderAnalyzingView renders the loading/analyzing state.
+func (a *App) renderAnalyzingView() string {
+	var b strings.Builder
+
+	// Header
+	header := tui.TitleStyle.Render("Analyzing Project...")
+	b.WriteString(header)
+	b.WriteString("\n\n")
+
+	// Spinner and status
+	spinnerLine := fmt.Sprintf("%s Understanding your codebase...", a.model.Spinner.View())
+	b.WriteString(spinnerLine)
+	b.WriteString("\n\n")
+
+	// Progress hints
+	hints := []string{
+		"Detecting project structure",
+		"Querying knowledge graph",
+		"Generating clarifying questions",
+	}
+	for _, hint := range hints {
+		b.WriteString(tui.DimStyle.Render("  - " + hint))
+		b.WriteString("\n")
+	}
+
+	// Wrap in box
+	content := b.String()
+	boxed := tui.BoxStyle.
+		Width(a.model.Width - 4).
+		Render(content)
+
+	// Center vertically
+	contentHeight := lipgloss.Height(boxed)
+	if a.model.Height > contentHeight {
+		padding := (a.model.Height - contentHeight) / 3
+		if padding > 0 {
+			boxed = strings.Repeat("\n", padding) + boxed
+		}
+	}
+
+	return boxed
+}
+
+// renderCompleteView renders the completion summary.
+func (a *App) renderCompleteView() string {
+	var b strings.Builder
+
+	// Header
+	header := tui.SuccessStyle.Render("Execution Complete!")
+	b.WriteString(header)
+	b.WriteString("\n\n")
+
+	// Summary stats
+	successCount := 0
+	failedCount := 0
+	skippedCount := 0
+	for _, bead := range a.model.Beads {
+		switch bead.Status {
+		case "success":
+			successCount++
+		case "failed":
+			failedCount++
+		case "skipped":
+			skippedCount++
+		}
+	}
+
+	b.WriteString(fmt.Sprintf("Total beads: %d\n", len(a.model.Beads)))
+	b.WriteString(tui.SuccessStyle.Render(fmt.Sprintf("Succeeded: %d\n", successCount)))
+	if failedCount > 0 {
+		b.WriteString(tui.ErrorStyle.Render(fmt.Sprintf("Failed: %d\n", failedCount)))
+	}
+	if skippedCount > 0 {
+		b.WriteString(tui.DimStyle.Render(fmt.Sprintf("Skipped: %d\n", skippedCount)))
+	}
+
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("Total tokens: %d\n", a.model.TokenCount))
+	b.WriteString(fmt.Sprintf("Duration: %s\n", a.model.ElapsedTime))
+
+	b.WriteString("\n")
+	b.WriteString(tui.DimStyle.Render("Press any key to exit..."))
+
+	// Wrap in box
+	content := b.String()
+	boxed := tui.BoxStyle.
+		Width(a.model.Width - 4).
+		Render(content)
+
+	// Center vertically
+	contentHeight := lipgloss.Height(boxed)
+	if a.model.Height > contentHeight {
+		padding := (a.model.Height - contentHeight) / 3
+		if padding > 0 {
+			boxed = strings.Repeat("\n", padding) + boxed
+		}
+	}
+
+	return boxed
+}
