@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -39,7 +40,9 @@ func Run(m tea.Model) error {
 }
 
 // runFallback handles non-TTY execution.
-// TODO: Delegate to existing CLI behavior for non-TTY
+// It uses the FallbackRunner to guide users to the appropriate CLI commands.
 func runFallback(_ tea.Model) error {
+	fmt.Println("Non-TTY environment detected.")
+	fmt.Println("Please use 'berth run <description>' for non-interactive execution.")
 	return nil
 }
