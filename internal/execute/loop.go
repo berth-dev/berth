@@ -4,6 +4,7 @@ package execute
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,7 +46,7 @@ func RunExecute(cfg config.Config, projectRoot string, runDir string, branchName
 // RunExecuteWithState is the main execution entry point that accepts optional
 // restored state from a checkpoint. Used by resume to restore execution state.
 func RunExecuteWithState(cfg config.Config, projectRoot string, runDir string, branchName string, verbose bool, state *ExecuteState) error {
-	// Check if parallel execution is appropriate.
+	// Check if parallel execution is appropriate (full parallel mode).
 	allBeadsList, err := beads.List()
 	if err != nil {
 		return fmt.Errorf("listing beads for mode check: %w", err)
@@ -135,160 +136,31 @@ func RunExecuteWithState(cfg config.Config, projectRoot string, runDir string, b
 		fmt.Fprintf(os.Stderr, "Warning: failed to log run_started: %v\n", logErr)
 	}
 
-	// 8. Main loop: process beads one at a time.
-	for {
-		task, err := beads.Ready()
-		if err != nil {
-			return fmt.Errorf("getting next ready bead: %w", err)
-		}
-		if task == nil {
-			// No more unblocked beads; we are done.
-			break
-		}
+	// 8. Compute execution groups for group-based execution.
+	groups := ComputeGroups(allBeads)
 
-		// Load sidecar metadata (files, verify_extra) from the plan phase.
-		if meta, err := beads.ReadBeadMeta(projectRoot, task.ID); err == nil {
-			if len(task.Files) == 0 && len(meta.Files) > 0 {
-				task.Files = meta.Files
+	// 9. Main loop: process beads group by group.
+	for _, group := range groups {
+		// Check if this group should run in parallel.
+		if shouldRunParallel(group, &cfg) {
+			// Parallel execution for this group.
+			if err := executeGroupParallel(
+				&cfg, group, allBeads, pool, projectRoot, branchName, runDir,
+				kgClient, logger, systemPrompt, verbose,
+				&completedBeads, &failedBeads, retryCount, breaker,
+			); err != nil {
+				return err
 			}
-			task.VerifyExtra = meta.VerifyExtra
-		}
-
-		// Ensure KG MCP is alive for this bead.
-		if cfg.KnowledgeGraph.Enabled != "never" {
-			kgClient, err = graph.EnsureMCPAlive(projectRoot, cfg.KnowledgeGraph, kgClient)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: KG MCP unavailable for bead %s: %v\n", task.ID, err)
-				kgClient = nil
-			}
-		}
-
-		// Mark bead as in_progress.
-		if err := beads.UpdateStatus(task.ID, "in_progress"); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to update bead %s status: %v\n", task.ID, err)
-		}
-
-		// Log task_started.
-		if logErr := logger.Append(log.LogEvent{
-			Event:  log.EventTaskStarted,
-			BeadID: task.ID,
-			Title:  task.Title,
-		}); logErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to log task_started: %v\n", logErr)
-		}
-
-		// Print progress.
-		fmt.Printf("%s %s: %s (attempt 1)...\n", pool.Progress(), task.ID, task.Title)
-
-		// Pre-embed graph data for this bead's files.
-		graphData := preEmbedGraphData(kgClient, task.Files)
-
-		// Execute with retry logic.
-		// RetryBead is defined in retry.go (same package, implemented by another agent).
-		opts := &SpawnClaudeOpts{Verbose: verbose}
-		beadResult, retryErr := RetryBead(cfg, task, graphData, projectRoot, logger, kgClient, opts)
-		if retryErr != nil {
-			fmt.Fprintf(os.Stderr, "Error during bead %s execution: %v\n", task.ID, retryErr)
-		}
-
-		// Extract summary from Claude's output for close reason.
-		var claudeOutput string
-		if beadResult != nil {
-			claudeOutput = beadResult.ClaudeOutput
-		}
-		closeReason := beads.ExtractSummary(claudeOutput, task.Title)
-
-		var lastError string
-		if beadResult != nil && beadResult.Passed {
-			// Bead succeeded: commit, close, record learning, reindex.
-			if err := onBeadSuccess(task, kgClient, projectRoot, logger, systemPrompt, closeReason); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: post-success steps failed for bead %s: %v\n", task.ID, err)
-			}
-			pool.RecordCompletion()
-			completedBeads = append(completedBeads, task.ID)
-			breaker.RecordSuccess() // Reset consecutive failures on success
 		} else {
-			// Bead failed all retries: enter stuck handling.
-			// HandleStuck is defined in stuck.go (same package, implemented by another agent).
-			action, stuckErr := HandleStuck(cfg, task, nil, "", graphData, projectRoot)
-			if stuckErr != nil {
-				fmt.Fprintf(os.Stderr, "Error handling stuck bead %s: %v\n", task.ID, stuckErr)
-				lastError = stuckErr.Error()
-			}
-
-			switch action.Action {
-			case stuckActionSkip:
-				pool.RecordSkip()
-				failedBeads = append(failedBeads, task.ID)
-				breaker.RecordFailure() // Increment consecutive failures
-			case stuckActionAbort:
-				// Save checkpoint before abort so state can be recovered.
-				saveCheckpointState(runDir, branchName, task.ID, completedBeads, failedBeads, retryCount, breaker.GetConsecutiveFailures(), "aborted by user")
-				// Abort the entire run.
-				if logErr := logger.Append(log.LogEvent{
-					Event:  log.EventRunComplete,
-					Reason: "aborted",
-					Total:  pool.Total,
-				}); logErr != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to log run_complete: %v\n", logErr)
-				}
-				return fmt.Errorf("run aborted at bead %s", task.ID)
-			case stuckActionRescue:
-				// Bead was rescued interactively; treat as completed.
-				if err := onBeadSuccess(task, kgClient, projectRoot, logger, systemPrompt); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: post-rescue steps failed for bead %s: %v\n", task.ID, err)
-				}
-				pool.RecordCompletion()
-				completedBeads = append(completedBeads, task.ID)
-				breaker.RecordSuccess() // Reset consecutive failures on success
-			case stuckActionHint:
-				// Hint succeeded verification; treat as completed.
-				if err := onBeadSuccess(task, kgClient, projectRoot, logger, systemPrompt); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: post-hint steps failed for bead %s: %v\n", task.ID, err)
-				}
-				pool.RecordCompletion()
-				completedBeads = append(completedBeads, task.ID)
-				breaker.RecordSuccess() // Reset consecutive failures on success
-			default:
-				pool.RecordStuck()
-				failedBeads = append(failedBeads, task.ID)
-				breaker.RecordFailure() // Increment consecutive failures
+			// Sequential execution for this group.
+			if err := executeGroupSequential(
+				&cfg, group, allBeads, pool, projectRoot, branchName, runDir,
+				kgClient, logger, systemPrompt, verbose,
+				&completedBeads, &failedBeads, retryCount, breaker,
+			); err != nil {
+				return err
 			}
 		}
-
-		// Check if circuit breaker should pause execution.
-		if breaker.ShouldPause() {
-			// Save checkpoint before pausing.
-			saveCheckpointState(runDir, branchName, task.ID, completedBeads, failedBeads, retryCount, breaker.GetConsecutiveFailures(), lastError)
-
-			action, err := handleCircuitBreakerPause(breaker, pool)
-			if err != nil {
-				return fmt.Errorf("circuit breaker pause error: %w", err)
-			}
-
-			switch action {
-			case "abort":
-				if logErr := logger.Append(log.LogEvent{
-					Event:  log.EventRunComplete,
-					Reason: "aborted by circuit breaker",
-					Total:  pool.Total,
-				}); logErr != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to log run_complete: %v\n", logErr)
-				}
-				return fmt.Errorf("run aborted by circuit breaker after %d consecutive failures", cfg.Execution.CircuitBreakerThreshold)
-			case "skip":
-				// Reset breaker and continue with remaining beads.
-				breaker.Reset()
-				fmt.Println("Circuit breaker reset. Continuing with remaining beads...")
-			case "retry":
-				// Reset breaker; the loop will naturally retry the next ready bead.
-				breaker.Reset()
-				fmt.Println("Circuit breaker reset. Retrying...")
-			}
-		}
-
-		// Save checkpoint after each bead completion/failure.
-		saveCheckpointState(runDir, branchName, task.ID, completedBeads, failedBeads, retryCount, breaker.GetConsecutiveFailures(), lastError)
 
 		if pool.IsComplete() {
 			break
@@ -333,6 +205,371 @@ func saveCheckpointState(runDir, runID, currentBeadID string, completedBeads, fa
 	if err := SaveCheckpoint(runDir, cp); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to save checkpoint: %v\n", err)
 	}
+}
+
+// shouldRunParallel determines whether a group should run in parallel based on
+// config settings and group characteristics.
+func shouldRunParallel(group ExecutionGroup, cfg *config.Config) bool {
+	if cfg.Execution.ParallelMode == "never" {
+		return false
+	}
+	if cfg.Execution.ParallelMode == "always" {
+		return group.Parallel && len(group.BeadIDs) > 1
+	}
+	// "auto": only if group has enough beads.
+	return group.Parallel && len(group.BeadIDs) >= cfg.Execution.ParallelThreshold
+}
+
+// executeGroupParallel runs all beads in a group concurrently, merges results,
+// and handles any conflicts.
+func executeGroupParallel(
+	cfg *config.Config,
+	group ExecutionGroup,
+	allBeads []beads.Bead,
+	pool *ExecutionPool,
+	projectRoot string,
+	branchName string,
+	runDir string,
+	kgClient *graph.Client,
+	logger *log.Logger,
+	systemPrompt string,
+	verbose bool,
+	completedBeads *[]string,
+	failedBeads *[]string,
+	retryCount map[string]int,
+	breaker *CircuitBreaker,
+) error {
+	fmt.Printf("Executing group %d with %d beads in parallel\n", group.Index, len(group.BeadIDs))
+
+	// Log task_started for all beads in the group.
+	for _, beadID := range group.BeadIDs {
+		bead := GetBeadByID(allBeads, beadID)
+		if bead == nil {
+			continue
+		}
+		// Mark bead as in_progress.
+		if err := beads.UpdateStatus(beadID, "in_progress"); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to update bead %s status: %v\n", beadID, err)
+		}
+		if logErr := logger.Append(log.LogEvent{
+			Event:  log.EventTaskStarted,
+			BeadID: beadID,
+			Title:  bead.Title,
+		}); logErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to log task_started: %v\n", logErr)
+		}
+		fmt.Printf("%s %s: %s (parallel)...\n", pool.Progress(), beadID, bead.Title)
+	}
+
+	// Create context for parallel execution.
+	ctx := context.Background()
+
+	// Run all beads in the group in parallel.
+	results := RunParallel(ctx, group, projectRoot, cfg, kgClient, systemPrompt, nil)
+
+	// Merge results into the target branch.
+	conflicts, mergeErr := MergeParallelResults(projectRoot, branchName, results)
+	if mergeErr != nil {
+		return fmt.Errorf("merging parallel results: %w", mergeErr)
+	}
+
+	// Handle conflicts if any.
+	if len(conflicts) > 0 {
+		fmt.Printf("Resolving %d merge conflicts...\n", len(conflicts))
+		conflictResult := RunConflictMerge(ctx, conflicts, projectRoot)
+		if !conflictResult.Resolved {
+			// Conflicts not resolved - enter stuck handling for affected beads.
+			for _, conflict := range conflicts {
+				bead := GetBeadByID(allBeads, conflict.BeadID)
+				if bead == nil {
+					continue
+				}
+				action, stuckErr := HandleStuck(*cfg, bead, nil, "merge conflict", "", projectRoot)
+				if stuckErr != nil {
+					fmt.Fprintf(os.Stderr, "Error handling stuck bead %s: %v\n", conflict.BeadID, stuckErr)
+				}
+				if action.Action == stuckActionAbort {
+					saveCheckpointState(runDir, branchName, conflict.BeadID, *completedBeads, *failedBeads, retryCount, breaker.GetConsecutiveFailures(), "merge conflict")
+					return fmt.Errorf("run aborted at bead %s due to unresolved merge conflict", conflict.BeadID)
+				}
+				pool.RecordStuck()
+				*failedBeads = append(*failedBeads, conflict.BeadID)
+				breaker.RecordFailure()
+			}
+		}
+	}
+
+	// Collect all changed files for KG reindexing.
+	var allChangedFiles []string
+	seenFiles := make(map[string]bool)
+
+	// Process results and update progress.
+	for _, result := range results {
+		bead := GetBeadByID(allBeads, result.BeadID)
+		if bead == nil {
+			continue
+		}
+
+		if result.Passed {
+			// Determine close reason from output.
+			closeReason := beads.ExtractSummary(result.ClaudeOutput, bead.Title)
+
+			// Handle success (commit metadata, close bead, log).
+			if err := onBeadSuccess(bead, kgClient, projectRoot, logger, systemPrompt, closeReason); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: post-success steps failed for bead %s: %v\n", result.BeadID, err)
+			}
+			pool.RecordCompletion()
+			*completedBeads = append(*completedBeads, result.BeadID)
+			breaker.RecordSuccess()
+
+			// Collect files for reindexing.
+			for _, f := range bead.Files {
+				if !seenFiles[f] {
+					seenFiles[f] = true
+					allChangedFiles = append(allChangedFiles, f)
+				}
+			}
+		} else {
+			// Bead failed - check if it was a conflict (already handled above).
+			isConflict := false
+			for _, c := range conflicts {
+				if c.BeadID == result.BeadID {
+					isConflict = true
+					break
+				}
+			}
+			if !isConflict {
+				// Not a conflict, enter stuck handling.
+				var errMsg string
+				if result.Error != nil {
+					errMsg = result.Error.Error()
+				}
+				action, stuckErr := HandleStuck(*cfg, bead, nil, errMsg, "", projectRoot)
+				if stuckErr != nil {
+					fmt.Fprintf(os.Stderr, "Error handling stuck bead %s: %v\n", result.BeadID, stuckErr)
+				}
+
+				switch action.Action {
+				case stuckActionSkip:
+					pool.RecordSkip()
+					*failedBeads = append(*failedBeads, result.BeadID)
+					breaker.RecordFailure()
+				case stuckActionAbort:
+					saveCheckpointState(runDir, branchName, result.BeadID, *completedBeads, *failedBeads, retryCount, breaker.GetConsecutiveFailures(), errMsg)
+					return fmt.Errorf("run aborted at bead %s", result.BeadID)
+				case stuckActionRescue, stuckActionHint:
+					if err := onBeadSuccess(bead, kgClient, projectRoot, logger, systemPrompt); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: post-rescue steps failed for bead %s: %v\n", result.BeadID, err)
+					}
+					pool.RecordCompletion()
+					*completedBeads = append(*completedBeads, result.BeadID)
+					breaker.RecordSuccess()
+				default:
+					pool.RecordStuck()
+					*failedBeads = append(*failedBeads, result.BeadID)
+					breaker.RecordFailure()
+				}
+			}
+		}
+	}
+
+	// Reindex all changed files in the KG.
+	if kgClient != nil && len(allChangedFiles) > 0 {
+		if err := graph.ReindexChanged(kgClient, allChangedFiles); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to reindex after group %d: %v\n", group.Index, err)
+		}
+	}
+
+	// Save checkpoint after group completion.
+	var lastBeadID string
+	if len(group.BeadIDs) > 0 {
+		lastBeadID = group.BeadIDs[len(group.BeadIDs)-1]
+	}
+	saveCheckpointState(runDir, branchName, lastBeadID, *completedBeads, *failedBeads, retryCount, breaker.GetConsecutiveFailures(), "")
+
+	// Check circuit breaker.
+	if breaker.ShouldPause() {
+		action, err := handleCircuitBreakerPause(breaker, pool)
+		if err != nil {
+			return fmt.Errorf("circuit breaker pause error: %w", err)
+		}
+		switch action {
+		case "abort":
+			return fmt.Errorf("run aborted by circuit breaker")
+		case "skip", "retry":
+			breaker.Reset()
+		}
+	}
+
+	return nil
+}
+
+// executeGroupSequential runs beads in a group one at a time (original behavior).
+func executeGroupSequential(
+	cfg *config.Config,
+	group ExecutionGroup,
+	allBeads []beads.Bead,
+	pool *ExecutionPool,
+	projectRoot string,
+	branchName string,
+	runDir string,
+	kgClient *graph.Client,
+	logger *log.Logger,
+	systemPrompt string,
+	verbose bool,
+	completedBeads *[]string,
+	failedBeads *[]string,
+	retryCount map[string]int,
+	breaker *CircuitBreaker,
+) error {
+	for _, beadID := range group.BeadIDs {
+		task := GetBeadByID(allBeads, beadID)
+		if task == nil {
+			continue
+		}
+
+		// Load sidecar metadata (files, verify_extra) from the plan phase.
+		if meta, metaErr := beads.ReadBeadMeta(projectRoot, task.ID); metaErr == nil {
+			if len(task.Files) == 0 && len(meta.Files) > 0 {
+				task.Files = meta.Files
+			}
+			task.VerifyExtra = meta.VerifyExtra
+		}
+
+		// Ensure KG MCP is alive for this bead.
+		var err error
+		if cfg.KnowledgeGraph.Enabled != "never" {
+			kgClient, err = graph.EnsureMCPAlive(projectRoot, cfg.KnowledgeGraph, kgClient)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: KG MCP unavailable for bead %s: %v\n", task.ID, err)
+				kgClient = nil
+			}
+		}
+
+		// Mark bead as in_progress.
+		if err := beads.UpdateStatus(task.ID, "in_progress"); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to update bead %s status: %v\n", task.ID, err)
+		}
+
+		// Log task_started.
+		if logErr := logger.Append(log.LogEvent{
+			Event:  log.EventTaskStarted,
+			BeadID: task.ID,
+			Title:  task.Title,
+		}); logErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to log task_started: %v\n", logErr)
+		}
+
+		// Print progress.
+		fmt.Printf("%s %s: %s (attempt 1)...\n", pool.Progress(), task.ID, task.Title)
+
+		// Pre-embed graph data for this bead's files.
+		graphData := preEmbedGraphData(kgClient, task.Files)
+
+		// Execute with retry logic.
+		opts := &SpawnClaudeOpts{Verbose: verbose}
+		beadResult, retryErr := RetryBead(*cfg, task, graphData, projectRoot, logger, kgClient, opts)
+		if retryErr != nil {
+			fmt.Fprintf(os.Stderr, "Error during bead %s execution: %v\n", task.ID, retryErr)
+		}
+
+		// Extract summary from Claude's output for close reason.
+		var claudeOutput string
+		if beadResult != nil {
+			claudeOutput = beadResult.ClaudeOutput
+		}
+		closeReason := beads.ExtractSummary(claudeOutput, task.Title)
+
+		var lastError string
+		if beadResult != nil && beadResult.Passed {
+			// Bead succeeded: commit, close, record learning, reindex.
+			if err := onBeadSuccess(task, kgClient, projectRoot, logger, systemPrompt, closeReason); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: post-success steps failed for bead %s: %v\n", task.ID, err)
+			}
+			pool.RecordCompletion()
+			*completedBeads = append(*completedBeads, task.ID)
+			breaker.RecordSuccess()
+		} else {
+			// Bead failed all retries: enter stuck handling.
+			action, stuckErr := HandleStuck(*cfg, task, nil, "", graphData, projectRoot)
+			if stuckErr != nil {
+				fmt.Fprintf(os.Stderr, "Error handling stuck bead %s: %v\n", task.ID, stuckErr)
+				lastError = stuckErr.Error()
+			}
+
+			switch action.Action {
+			case stuckActionSkip:
+				pool.RecordSkip()
+				*failedBeads = append(*failedBeads, task.ID)
+				breaker.RecordFailure()
+			case stuckActionAbort:
+				saveCheckpointState(runDir, branchName, task.ID, *completedBeads, *failedBeads, retryCount, breaker.GetConsecutiveFailures(), "aborted by user")
+				if logErr := logger.Append(log.LogEvent{
+					Event:  log.EventRunComplete,
+					Reason: "aborted",
+					Total:  pool.Total,
+				}); logErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to log run_complete: %v\n", logErr)
+				}
+				return fmt.Errorf("run aborted at bead %s", task.ID)
+			case stuckActionRescue:
+				if err := onBeadSuccess(task, kgClient, projectRoot, logger, systemPrompt); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: post-rescue steps failed for bead %s: %v\n", task.ID, err)
+				}
+				pool.RecordCompletion()
+				*completedBeads = append(*completedBeads, task.ID)
+				breaker.RecordSuccess()
+			case stuckActionHint:
+				if err := onBeadSuccess(task, kgClient, projectRoot, logger, systemPrompt); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: post-hint steps failed for bead %s: %v\n", task.ID, err)
+				}
+				pool.RecordCompletion()
+				*completedBeads = append(*completedBeads, task.ID)
+				breaker.RecordSuccess()
+			default:
+				pool.RecordStuck()
+				*failedBeads = append(*failedBeads, task.ID)
+				breaker.RecordFailure()
+			}
+		}
+
+		// Check if circuit breaker should pause execution.
+		if breaker.ShouldPause() {
+			saveCheckpointState(runDir, branchName, task.ID, *completedBeads, *failedBeads, retryCount, breaker.GetConsecutiveFailures(), lastError)
+
+			action, err := handleCircuitBreakerPause(breaker, pool)
+			if err != nil {
+				return fmt.Errorf("circuit breaker pause error: %w", err)
+			}
+
+			switch action {
+			case "abort":
+				if logErr := logger.Append(log.LogEvent{
+					Event:  log.EventRunComplete,
+					Reason: "aborted by circuit breaker",
+					Total:  pool.Total,
+				}); logErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to log run_complete: %v\n", logErr)
+				}
+				return fmt.Errorf("run aborted by circuit breaker after %d consecutive failures", cfg.Execution.CircuitBreakerThreshold)
+			case "skip":
+				breaker.Reset()
+				fmt.Println("Circuit breaker reset. Continuing with remaining beads...")
+			case "retry":
+				breaker.Reset()
+				fmt.Println("Circuit breaker reset. Retrying...")
+			}
+		}
+
+		// Save checkpoint after each bead completion/failure.
+		saveCheckpointState(runDir, branchName, task.ID, *completedBeads, *failedBeads, retryCount, breaker.GetConsecutiveFailures(), lastError)
+
+		if pool.IsComplete() {
+			break
+		}
+	}
+
+	return nil
 }
 
 // onBeadSuccess handles post-success steps: close bead, append learning,
