@@ -4,6 +4,7 @@ package understand
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -63,6 +64,140 @@ type UnderstandResponse struct {
 type Requirements struct {
 	Title   string
 	Content string // The full markdown content
+}
+
+// InterviewSession holds the state for a step-by-step interview driven by a TUI.
+// Instead of running a blocking loop, the TUI can call StartInterviewSession
+// to get the first questions, then repeatedly call ContinueInterview with answers.
+type InterviewSession struct {
+	CurrentRound     int
+	PreviousRounds   []Round
+	Config           config.Config
+	StackInfo        detect.StackInfo
+	RunDir           string
+	GraphSummary     string
+	Description      string
+	Context          context.Context
+	currentQuestions []Question // internal, for tracking current round's questions
+}
+
+// StartInterviewSession initializes a new interview session and returns the first
+// set of questions. This is used by the TUI to drive the interview step-by-step
+// instead of running a blocking loop.
+//
+// The returned session should be passed to ContinueInterview along with the user's
+// answers to get subsequent questions or the final requirements.
+func StartInterviewSession(
+	ctx context.Context,
+	cfg config.Config,
+	stackInfo detect.StackInfo,
+	description, runDir, graphSummary string,
+) (*InterviewSession, []Question, error) {
+	session := &InterviewSession{
+		CurrentRound:   1,
+		PreviousRounds: nil,
+		Config:         cfg,
+		StackInfo:      stackInfo,
+		RunDir:         runDir,
+		GraphSummary:   graphSummary,
+		Description:    description,
+		Context:        ctx,
+	}
+
+	// Build the first interview prompt.
+	prompt := BuildUnderstandPrompt(session.CurrentRound, session.PreviousRounds, stackInfo, graphSummary, description)
+
+	// Spawn Claude to generate the first set of questions.
+	output, err := spawnClaude(prompt)
+	if err != nil {
+		return nil, nil, fmt.Errorf("start interview: %w", err)
+	}
+
+	// Parse Claude's response.
+	cleaned := cleanJSONOutput(output)
+
+	var resp UnderstandResponse
+	if err := json.Unmarshal([]byte(cleaned), &resp); err != nil {
+		return nil, nil, fmt.Errorf("start interview: parsing response: %w\nRaw output:\n%s", err, output)
+	}
+
+	// If Claude signals done immediately (very simple task), return empty questions.
+	// The caller should check for this case.
+	if resp.Done {
+		// Store the requirements content so ContinueInterview can finalize.
+		// We use a synthetic question to signal completion.
+		session.currentQuestions = nil
+		return session, nil, nil
+	}
+
+	if len(resp.Questions) == 0 {
+		return nil, nil, fmt.Errorf("start interview: claude returned done=false but no questions")
+	}
+
+	session.currentQuestions = resp.Questions
+	return session, resp.Questions, nil
+}
+
+// ContinueInterview processes the user's answers and returns either the next set
+// of questions or the final requirements document.
+//
+// Returns:
+//   - questions: The next set of questions (empty if done)
+//   - done: True if the interview is complete and requirements are ready
+//   - requirements: The final requirements document (nil if not done)
+//   - error: Any error that occurred
+//
+// If done is true, the requirements document has been written to disk and the
+// Requirements struct is returned. If done is false, the caller should display
+// the questions and call ContinueInterview again with the answers.
+func (s *InterviewSession) ContinueInterview(answers []Answer) ([]Question, bool, *Requirements, error) {
+	// Store the current round with questions and answers.
+	s.PreviousRounds = append(s.PreviousRounds, Round{
+		Questions: s.currentQuestions,
+		Answers:   answers,
+	})
+
+	// Increment round count.
+	s.CurrentRound++
+
+	// Check for max rounds safety cap.
+	if s.CurrentRound > maxRounds {
+		return nil, false, nil, fmt.Errorf("interview: reached maximum rounds (%d) without completion", maxRounds)
+	}
+
+	// Build the next prompt with accumulated history.
+	prompt := BuildUnderstandPrompt(s.CurrentRound, s.PreviousRounds, s.StackInfo, s.GraphSummary, s.Description)
+
+	// Spawn Claude for the next round.
+	output, err := spawnClaude(prompt)
+	if err != nil {
+		return nil, false, nil, fmt.Errorf("interview round %d: %w", s.CurrentRound, err)
+	}
+
+	// Parse Claude's response.
+	cleaned := cleanJSONOutput(output)
+
+	var resp UnderstandResponse
+	if err := json.Unmarshal([]byte(cleaned), &resp); err != nil {
+		return nil, false, nil, fmt.Errorf("interview round %d: parsing response: %w\nRaw output:\n%s", s.CurrentRound, err, output)
+	}
+
+	// If Claude signals done, build and return requirements.
+	if resp.Done {
+		reqs, err := finalize(resp, s.RunDir)
+		if err != nil {
+			return nil, false, nil, err
+		}
+		return nil, true, reqs, nil
+	}
+
+	// Not done: return the next set of questions.
+	if len(resp.Questions) == 0 {
+		return nil, false, nil, fmt.Errorf("interview round %d: claude returned done=false but no questions", s.CurrentRound)
+	}
+
+	s.currentQuestions = resp.Questions
+	return resp.Questions, false, nil, nil
 }
 
 // RunUnderstand drives the interview loop to gather requirements from the user.
