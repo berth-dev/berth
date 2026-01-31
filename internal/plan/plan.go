@@ -235,7 +235,7 @@ func RunPlanNonInteractive(
 
 	rawOutput, err := spawnClaude(prompt)
 	if err != nil {
-		return nil, fmt.Errorf("Claude failed: %w", err)
+		return nil, fmt.Errorf("claude failed: %w", err)
 	}
 
 	plan, err := ParsePlan(rawOutput)

@@ -24,7 +24,8 @@ func StartExecutionCmd(
 			defer close(outputChan)
 			// Create execution state and run with streaming output.
 			// verbose=false for TUI mode, state=nil for fresh execution.
-			execute.RunExecuteWithState(
+			// Error is communicated via channel events (execution_complete with error content)
+			_ = execute.RunExecuteWithState(
 				cfg,
 				projectRoot,
 				runDir,
