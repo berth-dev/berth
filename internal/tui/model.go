@@ -12,6 +12,7 @@ import (
 
 	"github.com/berth-dev/berth/internal/config"
 	"github.com/berth-dev/berth/internal/detect"
+	"github.com/berth-dev/berth/internal/execute"
 	"github.com/berth-dev/berth/internal/graph"
 	"github.com/berth-dev/berth/internal/understand"
 )
@@ -188,7 +189,10 @@ type Model struct {
 	Height int
 
 	// Output channel for streaming bead output
-	OutputChan chan OutputEvent
+	OutputChan chan execute.StreamEvent
+
+	// Branch name for execution
+	BranchName string
 }
 
 // NewModel creates a new Model with the given configuration.
@@ -244,7 +248,7 @@ func NewModel(cfg *config.Config, projectRoot string) *Model {
 		Width:  80,
 		Height: 24,
 
-		// Output channel
-		OutputChan: make(chan OutputEvent, 100),
+		// Output channel - initialized when execution starts
+		OutputChan: nil,
 	}
 }

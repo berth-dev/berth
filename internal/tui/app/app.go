@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/berth-dev/berth/internal/config"
+	"github.com/berth-dev/berth/internal/execute"
 	"github.com/berth-dev/berth/internal/tui"
 	"github.com/berth-dev/berth/internal/tui/commands"
 	"github.com/berth-dev/berth/internal/tui/views"
@@ -314,7 +315,26 @@ func (a *App) updateApproval(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		a.transitionToExecuting(beads)
-		return a, a.executionView.Init()
+
+		// Create output channel for streaming events
+		a.model.OutputChan = make(chan execute.StreamEvent, 100)
+
+		// Compute branch name from plan title or use default
+		branchName := a.model.BranchName
+		if branchName == "" {
+			branchName = "berth-execution"
+		}
+
+		return a, tea.Batch(
+			a.executionView.Init(),
+			commands.StartExecutionCmd(
+				*a.model.Cfg,
+				a.model.ProjectRoot,
+				a.model.RunDir,
+				branchName,
+				a.model.OutputChan,
+			),
+		)
 
 	case tui.RejectMsg:
 		a.model.State = tui.StateAnalyzing
@@ -339,6 +359,40 @@ func (a *App) updateExecuting(msg tea.Msg) (tea.Model, tea.Cmd) {
 	a.executionView, cmd = a.executionView.Update(msg)
 
 	switch msg := msg.(type) {
+	case tui.ExecutionStartedMsg:
+		// Start listening for execution events
+		return a, commands.ListenExecutionCmd(a.model.OutputChan)
+
+	case tui.ExecutionEventMsg:
+		// Handle streaming events from execution
+		switch msg.Event.Type {
+		case "bead_init":
+			// Find bead and mark as running
+			a.updateBeadStatus(msg.Event.BeadID, "running")
+		case "output":
+			// Append to current bead output
+			a.model.BeadOutput = append(a.model.BeadOutput, msg.Event.Content)
+		case "bead_complete":
+			a.updateBeadStatus(msg.Event.BeadID, "success")
+		case "error":
+			a.updateBeadStatus(msg.Event.BeadID, "failed")
+		case "token_update":
+			a.model.TokenCount += msg.Event.Tokens
+		}
+		// Continue listening for more events
+		return a, commands.ListenExecutionCmd(a.model.OutputChan)
+
+	case tui.ExecutionCompleteMsg:
+		a.model.State = tui.StateComplete
+		return a, nil
+
+	case tui.TickMsg:
+		// Keep polling for events if execution is in progress
+		if a.model.OutputChan != nil {
+			return a, commands.ListenExecutionCmd(a.model.OutputChan)
+		}
+		return a, nil
+
 	case tui.PauseMsg:
 		a.model.IsPaused = msg.Paused
 		return a, cmd
@@ -471,6 +525,16 @@ func (a *App) isInputFocused() bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// updateBeadStatus updates the status of a bead by ID.
+func (a *App) updateBeadStatus(beadID string, status string) {
+	for i := range a.model.Beads {
+		if a.model.Beads[i].ID == beadID {
+			a.model.Beads[i].Status = status
+			break
+		}
 	}
 }
 
