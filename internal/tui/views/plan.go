@@ -217,7 +217,7 @@ func (m PlanModel) View() string {
 	b.WriteString("\n")
 
 	// Footer
-	footer := tui.DimStyle.Render("[a] Approve   [r] Reject   [↑↓] Navigate   [Enter] Expand")
+	footer := tui.DimStyle.Render("[a] Approve · [r] Reject · [↑ ↓] Navigate · [Enter] Expand")
 	b.WriteString(footer)
 
 	// Wrap in box style

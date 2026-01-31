@@ -84,6 +84,9 @@ type DashboardModel struct {
 	store       *session.Store
 	projectRoot string
 	rootFile    string
+
+	// Ctrl+C confirmation state
+	ctrlCPending bool
 }
 
 // DashboardDeps holds the dependencies needed by the dashboard view.
@@ -94,18 +97,20 @@ type DashboardDeps struct {
 	RootFile    string
 }
 
+// maxDashboardWidth is the maximum width for the dashboard box.
+const maxDashboardWidth = 110
+
+// maxContentHeight is the maximum height for scrollable content areas.
+const maxContentHeight = 15
+
 // NewDashboardModel creates a new DashboardModel with the given data and dependencies.
 func NewDashboardModel(diagram string, learnings []string, sessions []tui.SessionInfo, width, height int, deps *DashboardDeps) DashboardModel {
-	// Initialize viewport for diagram/learnings
-	// Reserve space for tab bar (2 lines), footer (2 lines), and box padding
-	contentHeight := height - 10
-	if contentHeight < 5 {
-		contentHeight = 5
-	}
-	contentWidth := width - 8
+	// Use constrained dimensions for consistent sizing
+	contentWidth := maxDashboardWidth - 8
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
+	contentHeight := maxContentHeight
 
 	vp := viewport.New(contentWidth, contentHeight)
 	vp.SetContent(diagram)
@@ -209,22 +214,7 @@ func (m DashboardModel) Update(msg tea.Msg) (DashboardModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-
-		// Recalculate content dimensions
-		contentHeight := m.height - 10
-		if contentHeight < 5 {
-			contentHeight = 5
-		}
-		contentWidth := m.width - 8
-		if contentWidth < 20 {
-			contentWidth = 20
-		}
-
-		m.viewport.Width = contentWidth
-		m.viewport.Height = contentHeight
-		m.sessionList.SetWidth(contentWidth)
-		m.sessionList.SetHeight(contentHeight)
-		m.updateViewportContent()
+		// Viewport and list dimensions stay fixed for consistent sizing
 		return m, nil
 
 	case tui.ArchitectureDiagramMsg:
@@ -342,20 +332,17 @@ func (m DashboardModel) View() string {
 	// Footer with relevant keybindings per tab
 	b.WriteString(m.renderFooter())
 
-	// Wrap in box style
+	// Determine box width - use max width or screen width, whichever is smaller
+	boxWidth := maxDashboardWidth
+	if m.width-4 < boxWidth {
+		boxWidth = m.width - 4
+	}
+
+	// Wrap in box style with fixed max width
 	content := b.String()
 	boxed := tui.BoxStyle.
-		Width(m.width - 4).
+		Width(boxWidth).
 		Render(content)
-
-	// Center vertically if there's space
-	contentHeight := lipgloss.Height(boxed)
-	if m.height > contentHeight {
-		padding := (m.height - contentHeight) / 3
-		if padding > 0 {
-			boxed = strings.Repeat("\n", padding) + boxed
-		}
-	}
 
 	return boxed
 }
@@ -381,7 +368,7 @@ func (m DashboardModel) renderFooter() string {
 	var hints []string
 
 	// Common hints
-	hints = append(hints, "←/→: Switch tabs")
+	hints = append(hints, "Tab/← →: Switch tabs")
 
 	// Tab-specific hints
 	switch m.activeTab {
@@ -395,8 +382,21 @@ func (m DashboardModel) renderFooter() string {
 		hints = append(hints, "/: Filter")
 	}
 
-	// Exit hint
-	hints = append(hints, "Ctrl+C: Exit")
+	// Build the hint string
+	hintsStr := tui.DimStyle.Render(strings.Join(hints, " · "))
 
-	return tui.DimStyle.Render(strings.Join(hints, "   "))
+	// Exit hint - dynamic based on Ctrl+C state
+	ctrlCHint := "Ctrl+C: Exit"
+	if m.ctrlCPending {
+		ctrlCHint = tui.WarningStyle.Render("Press Ctrl+C again to exit")
+	} else {
+		ctrlCHint = tui.DimStyle.Render(ctrlCHint)
+	}
+
+	return hintsStr + " · " + ctrlCHint
+}
+
+// SetCtrlCPending sets the Ctrl+C pending state for display.
+func (m *DashboardModel) SetCtrlCPending(pending bool) {
+	m.ctrlCPending = pending
 }

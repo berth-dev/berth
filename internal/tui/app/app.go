@@ -3,6 +3,8 @@ package app
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -25,6 +27,7 @@ type App struct {
 	model *tui.Model
 
 	// View models
+	initView      views.InitModel
 	homeView      views.HomeModel
 	interviewView views.InterviewModel
 	chatView      views.ChatModel
@@ -44,8 +47,9 @@ func New(cfg *config.Config, projectRoot string) *App {
 }
 
 // Init returns the initial command for the TUI.
+// It first checks if the project needs initialization.
 func (a *App) Init() tea.Cmd {
-	return a.homeView.Init()
+	return commands.CheckInitCmd(a.model.ProjectRoot)
 }
 
 // Update handles messages and updates the application state.
@@ -77,17 +81,41 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case tui.KeyCtrlC:
-			return a, tea.Quit
+			if a.model.CtrlCPending {
+				// Second press within timeout - exit
+				return a, tea.Quit
+			}
+			// First press - set pending and start timeout
+			a.model.CtrlCPending = true
+			return a, tea.Tick(time.Second, func(t time.Time) tea.Msg {
+				return tui.CtrlCResetMsg{}
+			})
 
 		case tui.KeyTab:
-			// Always cycle through tabs - Tab isn't needed for single-line inputs
-			cmd := a.cycleTab()
-			return a, cmd
+			// Only cycle tabs when on home or dashboard screens
+			if a.model.State == tui.StateHome || a.model.State == tui.StateDashboard {
+				cmd := a.cycleTab()
+				return a, cmd
+			}
+			// For other states, let the view handle tab (e.g., toggle selection in init view)
 		}
+
+	case tui.CtrlCResetMsg:
+		// Reset Ctrl+C confirmation state after timeout
+		a.model.CtrlCPending = false
+		return a, nil
+	}
+
+	// Handle init check message (can arrive before state is set)
+	if checkMsg, ok := msg.(tui.InitCheckMsg); ok {
+		return a.handleInitCheck(checkMsg)
 	}
 
 	// Route messages based on current state
 	switch a.model.State {
+	case tui.StateInit:
+		return a.updateInit(msg)
+
 	case tui.StateHome:
 		return a.updateHome(msg)
 
@@ -122,16 +150,29 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View renders the current application state.
 func (a *App) View() string {
 	var content string
+	var needsCentering bool
+
+	// Sync Ctrl+C pending state to views
+	a.initView.SetCtrlCPending(a.model.CtrlCPending)
+	a.homeView.SetCtrlCPending(a.model.CtrlCPending)
+	a.dashboardView.SetCtrlCPending(a.model.CtrlCPending)
 
 	switch a.model.State {
+	case tui.StateInit:
+		content = a.initView.View()
+		needsCentering = true
+
 	case tui.StateHome:
 		content = a.homeView.View()
+		needsCentering = true
 
 	case tui.StateAnalyzing:
 		content = a.renderAnalyzingView()
+		needsCentering = true
 
 	case tui.StateInterview:
 		content = a.interviewView.View()
+		needsCentering = true
 
 	case tui.StateChat:
 		content = a.chatView.View()
@@ -144,9 +185,11 @@ func (a *App) View() string {
 
 	case tui.StateDashboard:
 		content = a.dashboardView.View()
+		needsCentering = true
 
 	case tui.StateComplete:
 		content = a.renderCompleteView()
+		needsCentering = true
 
 	default:
 		content = "Unknown state"
@@ -155,15 +198,75 @@ func (a *App) View() string {
 	// Add tab bar at bottom for applicable states
 	if a.shouldShowTabBar() {
 		tabBar := a.renderTabBar(a.model.ActiveTab)
-		content = content + "\n" + tabBar
+		// Join vertically with center alignment so both box and tab bar are aligned
+		content = lipgloss.JoinVertical(lipgloss.Center, content, "", tabBar)
+	}
+
+	// Center content both horizontally and vertically for applicable states
+	if needsCentering {
+		content = a.centerContent(content)
 	}
 
 	return content
 }
 
+// centerContent centers the given content both horizontally and vertically.
+func (a *App) centerContent(content string) string {
+	// Use lipgloss.Place to center content in the available space
+	// This properly centers the entire block, not just the text within it
+	return lipgloss.Place(
+		a.model.Width,
+		a.model.Height,
+		lipgloss.Center,
+		lipgloss.Center,
+		content,
+	)
+}
+
 // ============================================================================
 // State Update Handlers
 // ============================================================================
+
+// handleInitCheck processes the init check result and transitions to appropriate state.
+func (a *App) handleInitCheck(msg tui.InitCheckMsg) (tea.Model, tea.Cmd) {
+	if msg.NeedsInit {
+		// Project needs initialization - show init prompt
+		a.model.State = tui.StateInit
+		a.initView = views.NewInitModel(
+			a.model.Width,
+			a.model.Height,
+			filepath.Base(a.model.ProjectRoot),
+		)
+		return a, a.initView.Init()
+	}
+
+	// Project already initialized - go to home
+	a.model.State = tui.StateHome
+	return a, a.homeView.Init()
+}
+
+// updateInit handles messages for the initialization prompt state.
+func (a *App) updateInit(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	a.initView, cmd = a.initView.Update(msg)
+
+	switch msg.(type) {
+	case tui.InitConfirmMsg:
+		// User confirmed - run initialization with spinner
+		a.model.State = tui.StateAnalyzing
+		a.model.AnalyzingStartTime = time.Now()
+		return a, tea.Batch(
+			a.model.Spinner.Tick,
+			commands.RunInitCmd(a.model.ProjectRoot),
+		)
+
+	case tui.InitDeclineMsg:
+		// User declined - exit
+		return a, tea.Quit
+	}
+
+	return a, cmd
+}
 
 func (a *App) updateHome(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
@@ -208,6 +311,26 @@ func (a *App) updateAnalyzing(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.model.AnalyzingStartTime = time.Time{}
 		return a, nil
 
+	case tui.InitCompleteMsg:
+		// Initialization complete - reload config and transition to home
+		a.model.StackInfo = msg.StackInfo
+
+		// Reload config now that it exists
+		if cfg, err := config.ReadConfig(a.model.ProjectRoot); err == nil {
+			a.model.Cfg = cfg
+		}
+
+		a.model.State = tui.StateHome
+		a.model.AnalyzingStartTime = time.Time{}
+		return a, a.homeView.Init()
+
+	case tui.InitErrorMsg:
+		a.model.Err = msg.Err
+		a.homeView.Err = msg.Err
+		a.model.State = tui.StateHome
+		a.model.AnalyzingStartTime = time.Time{}
+		return a, a.homeView.Init()
+
 	case tui.AnalysisCompleteMsg:
 		a.transitionToInterview(msg.Questions)
 		return a, a.interviewView.Init()
@@ -246,6 +369,46 @@ func (a *App) updateAnalyzing(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.PlanGeneratedMsg:
 		a.TransitionToApproval(msg.Plan, msg.Groups)
 		return a, a.planView.Init()
+
+	case tui.BeadsCreatedMsg:
+		// Beads have been created in the beads system, now start execution.
+		beads := make([]tui.BeadState, len(a.model.Plan.Beads))
+		for i, b := range a.model.Plan.Beads {
+			beads[i] = tui.BeadState{
+				ID:        b.ID,
+				Title:     b.Title,
+				Status:    "pending",
+				BlockedBy: b.DependsOn,
+			}
+		}
+		a.transitionToExecuting(beads)
+
+		// Create output channel for streaming events
+		a.model.OutputChan = make(chan execute.StreamEvent, 100)
+
+		// Compute branch name from plan title or use default
+		branchName := a.model.BranchName
+		if branchName == "" {
+			branchName = "berth-execution"
+		}
+
+		return a, tea.Batch(
+			a.executionView.Init(),
+			commands.StartExecutionCmd(
+				*a.model.Cfg,
+				a.model.ProjectRoot,
+				a.model.RunDir,
+				branchName,
+				a.model.OutputChan,
+			),
+		)
+
+	case tui.BeadsCreateErrorMsg:
+		a.model.Err = msg.Err
+		a.homeView.Err = msg.Err
+		a.model.State = tui.StateHome
+		a.model.AnalyzingStartTime = time.Time{}
+		return a, nil
 
 	case tui.PlanErrorMsg:
 		a.model.Err = msg.Err
@@ -331,6 +494,12 @@ func (a *App) updateInterview(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.model.Spinner.Tick,
 			commands.ProcessAnswersCmd(a.model.InterviewSession, a.model.Answers),
 		)
+
+	case tui.GoHomeMsg:
+		// Return to home screen
+		a.model.State = tui.StateHome
+		a.model.ActiveTab = tui.TabChat
+		return a, a.homeView.Init()
 	}
 
 	return a, cmd
@@ -368,36 +537,13 @@ func (a *App) updateApproval(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tui.ApproveMsg:
-		// Transition to execution
-		beads := make([]tui.BeadState, len(a.model.Plan.Beads))
-		for i, b := range a.model.Plan.Beads {
-			beads[i] = tui.BeadState{
-				ID:        b.ID,
-				Title:     b.Title,
-				Status:    "pending",
-				BlockedBy: b.DependsOn,
-			}
-		}
-		a.transitionToExecuting(beads)
-
-		// Create output channel for streaming events
-		a.model.OutputChan = make(chan execute.StreamEvent, 100)
-
-		// Compute branch name from plan title or use default
-		branchName := a.model.BranchName
-		if branchName == "" {
-			branchName = "berth-execution"
-		}
-
+		// First, create beads in the beads system before execution.
+		// Show spinner while creating beads.
+		a.model.State = tui.StateAnalyzing
+		a.model.AnalyzingStartTime = time.Now()
 		return a, tea.Batch(
-			a.executionView.Init(),
-			commands.StartExecutionCmd(
-				*a.model.Cfg,
-				a.model.ProjectRoot,
-				a.model.RunDir,
-				branchName,
-				a.model.OutputChan,
-			),
+			a.model.Spinner.Tick,
+			commands.CreateBeadsCmd(a.model.Plan, a.model.ProjectRoot),
 		)
 
 	case tui.RejectMsg:
@@ -535,6 +681,19 @@ func (a *App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a *App) transitionToAnalyzing(description string) tea.Cmd {
 	a.model.State = tui.StateAnalyzing
 	a.model.AnalyzingStartTime = time.Now()
+
+	// Create run directory if not already set.
+	// This mirrors the behavior of cli/run.go which creates .berth/runs/<timestamp>.
+	if a.model.RunDir == "" {
+		timestamp := time.Now().Format("20060102-150405")
+		a.model.RunDir = filepath.Join(".berth", "runs", timestamp)
+		if err := os.MkdirAll(a.model.RunDir, 0755); err != nil {
+			// Return error message to transition back to home with error
+			return func() tea.Msg {
+				return tui.ErrorMsg{Err: fmt.Errorf("creating run directory: %w", err)}
+			}
+		}
+	}
 
 	// Add initial system message
 	a.model.ChatHistory = append(a.model.ChatHistory, tui.ChatMessage{
@@ -711,7 +870,7 @@ func (a *App) renderTabBar(activeTab tui.Tab) string {
 		name string
 		tab  tui.Tab
 	}{
-		{"Chat", tui.TabChat},
+		{"Home", tui.TabChat},
 		{"Dashboard", tui.TabDashboard},
 	}
 
@@ -756,20 +915,18 @@ func (a *App) renderAnalyzingView() string {
 		b.WriteString("\n")
 	}
 
-	// Wrap in box
+	// Determine box width - use max width or screen width, whichever is smaller
+	const maxBoxWidth = 70
+	boxWidth := maxBoxWidth
+	if a.model.Width-4 < boxWidth {
+		boxWidth = a.model.Width - 4
+	}
+
+	// Wrap in box with fixed max width
 	content := b.String()
 	boxed := tui.BoxStyle.
-		Width(a.model.Width - 4).
+		Width(boxWidth).
 		Render(content)
-
-	// Center vertically
-	contentHeight := lipgloss.Height(boxed)
-	if a.model.Height > contentHeight {
-		padding := (a.model.Height - contentHeight) / 3
-		if padding > 0 {
-			boxed = strings.Repeat("\n", padding) + boxed
-		}
-	}
 
 	return boxed
 }
@@ -814,20 +971,18 @@ func (a *App) renderCompleteView() string {
 	b.WriteString("\n")
 	b.WriteString(tui.DimStyle.Render("Press any key to exit..."))
 
-	// Wrap in box
+	// Determine box width - use max width or screen width, whichever is smaller
+	const maxBoxWidth = 70
+	boxWidth := maxBoxWidth
+	if a.model.Width-4 < boxWidth {
+		boxWidth = a.model.Width - 4
+	}
+
+	// Wrap in box with fixed max width
 	content := b.String()
 	boxed := tui.BoxStyle.
-		Width(a.model.Width - 4).
+		Width(boxWidth).
 		Render(content)
-
-	// Center vertically
-	contentHeight := lipgloss.Height(boxed)
-	if a.model.Height > contentHeight {
-		padding := (a.model.Height - contentHeight) / 3
-		if padding > 0 {
-			boxed = strings.Repeat("\n", padding) + boxed
-		}
-	}
 
 	return boxed
 }

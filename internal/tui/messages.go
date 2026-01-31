@@ -2,14 +2,43 @@
 package tui
 
 import (
+	"github.com/berth-dev/berth/internal/detect"
 	"github.com/berth-dev/berth/internal/execute"
 	"github.com/berth-dev/berth/internal/session"
 	"github.com/berth-dev/berth/internal/understand"
 )
 
 // ============================================================================
+// Initialization Messages
+// ============================================================================
+
+// InitCheckMsg signals whether the project needs initialization.
+type InitCheckMsg struct {
+	NeedsInit bool
+}
+
+// InitConfirmMsg signals the user confirmed initialization.
+type InitConfirmMsg struct{}
+
+// InitDeclineMsg signals the user declined initialization.
+type InitDeclineMsg struct{}
+
+// InitCompleteMsg signals initialization completed successfully.
+type InitCompleteMsg struct {
+	StackInfo detect.StackInfo
+}
+
+// InitErrorMsg signals an error during initialization.
+type InitErrorMsg struct {
+	Err error
+}
+
+// ============================================================================
 // State Transition Messages
 // ============================================================================
+
+// GoHomeMsg signals a request to return to the home screen.
+type GoHomeMsg struct{}
 
 // EnterChatMsg triggers a transition into chat mode for a specific question.
 type EnterChatMsg struct {
@@ -223,12 +252,23 @@ type PlanRegenerateMsg struct {
 	Feedback string
 }
 
+// BeadsCreatedMsg signals that beads have been successfully created in the beads system.
+type BeadsCreatedMsg struct{}
+
+// BeadsCreateErrorMsg signals an error creating beads in the beads system.
+type BeadsCreateErrorMsg struct {
+	Err error
+}
+
 // ============================================================================
 // Utility Messages
 // ============================================================================
 
 // TickMsg is sent periodically for time-based updates (spinners, timers).
 type TickMsg struct{}
+
+// CtrlCResetMsg resets the Ctrl+C confirmation state after timeout.
+type CtrlCResetMsg struct{}
 
 // ErrorMsg is a generic error message for unrecoverable errors.
 type ErrorMsg struct {

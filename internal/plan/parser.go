@@ -304,6 +304,28 @@ func ConvertToTUIPlan(p *Plan) *tui.Plan {
 	}
 }
 
+// ConvertFromTUIPlan converts a tui.Plan back to a plan.Plan for use with
+// CreateBeads and other plan operations that require the plan package types.
+func ConvertFromTUIPlan(p *tui.Plan) *Plan {
+	planBeads := make([]BeadSpec, len(p.Beads))
+	for i, spec := range p.Beads {
+		planBeads[i] = BeadSpec{
+			ID:          spec.ID,
+			Title:       spec.Title,
+			Description: spec.Description,
+			Files:       spec.Files,
+			DependsOn:   spec.DependsOn,
+			VerifyExtra: spec.VerifyExtra,
+		}
+	}
+	return &Plan{
+		Title:       p.Title,
+		Description: p.Description,
+		Beads:       planBeads,
+		RawOutput:   p.RawOutput,
+	}
+}
+
 // ConvertToExecutionBeads converts plan.BeadSpecs to beads.Bead slice for use
 // with ComputeGroups and bead execution. Status is initialized to "open".
 func ConvertToExecutionBeads(specs []BeadSpec) []beads.Bead {

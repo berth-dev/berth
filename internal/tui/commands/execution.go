@@ -8,8 +8,26 @@ import (
 
 	"github.com/berth-dev/berth/internal/config"
 	"github.com/berth-dev/berth/internal/execute"
+	"github.com/berth-dev/berth/internal/plan"
 	"github.com/berth-dev/berth/internal/tui"
 )
+
+// CreateBeadsCmd creates beads in the beads system from the approved plan.
+// This must be called before StartExecutionCmd so that the execution loop
+// can find the beads to execute.
+// Returns BeadsCreatedMsg on success, or BeadsCreateErrorMsg on failure.
+func CreateBeadsCmd(tuiPlan *tui.Plan, projectRoot string) tea.Cmd {
+	return func() tea.Msg {
+		// Convert tui.Plan to plan.Plan for CreateBeads
+		planPlan := plan.ConvertFromTUIPlan(tuiPlan)
+
+		if err := plan.CreateBeads(planPlan, projectRoot); err != nil {
+			return tui.BeadsCreateErrorMsg{Err: err}
+		}
+
+		return tui.BeadsCreatedMsg{}
+	}
+}
 
 // StartExecutionCmd launches the execution loop in a background goroutine.
 // The execution runs asynchronously and streams events to outputChan.

@@ -233,7 +233,7 @@ func (m ExecutionModel) View() string {
 	b.WriteString("\n")
 
 	// Footer with keybindings
-	footer := tui.DimStyle.Render("p: Pause  s: Skip bead  c: Chat about this bead       Ctrl+C: Abort")
+	footer := tui.DimStyle.Render("p: Pause · s: Skip bead · c: Chat about this bead · Ctrl+C: Abort")
 	b.WriteString(footer)
 
 	// Wrap in box style

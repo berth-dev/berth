@@ -21,7 +21,8 @@ import (
 type ViewState int
 
 const (
-	StateHome ViewState = iota
+	StateInit ViewState = iota // Project needs initialization
+	StateHome
 	StateAnalyzing
 	StateInterview
 	StateChat
@@ -191,6 +192,9 @@ type Model struct {
 
 	// Branch name for execution
 	BranchName string
+
+	// Ctrl+C confirmation state
+	CtrlCPending bool // True when waiting for second Ctrl+C press
 }
 
 // NewModel creates a new Model with the given configuration.
