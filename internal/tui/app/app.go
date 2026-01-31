@@ -200,7 +200,25 @@ func (a *App) updateAnalyzing(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tui.InterviewCompleteMsg:
 		a.model.Requirements = msg.Requirements
-		// TODO: Transition to plan generation (will be implemented in TUI-12)
+		a.model.State = tui.StateAnalyzing // show spinner while generating plan
+		return a, tea.Batch(
+			a.model.Spinner.Tick,
+			commands.GeneratePlanCmd(
+				*a.model.Cfg,
+				msg.Requirements,
+				a.model.GraphSummary,
+				a.model.RunDir,
+				a.model.IsGreenfield,
+			),
+		)
+
+	case tui.PlanGeneratedMsg:
+		a.TransitionToApproval(msg.Plan, msg.Groups)
+		return a, a.planView.Init()
+
+	case tui.PlanErrorMsg:
+		a.model.Err = msg.Err
+		a.model.State = tui.StateHome
 		return a, nil
 
 	case tui.InterviewErrorMsg:
@@ -299,9 +317,18 @@ func (a *App) updateApproval(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.executionView.Init()
 
 	case tui.RejectMsg:
-		// TODO: Handle plan rejection with feedback
-		_ = msg.Feedback
-		return a, nil
+		a.model.State = tui.StateAnalyzing
+		return a, tea.Batch(
+			a.model.Spinner.Tick,
+			commands.RegeneratePlanCmd(
+				*a.model.Cfg,
+				a.model.Requirements,
+				a.model.GraphSummary,
+				a.model.RunDir,
+				a.model.IsGreenfield,
+				msg.Feedback,
+			),
+		)
 	}
 
 	return a, cmd

@@ -147,6 +147,9 @@ type Model struct {
 	KGClient     *graph.Client
 	GraphSummary string
 
+	// Project flags
+	IsGreenfield bool
+
 	// Interview state
 	ChatHistory      []ChatMessage
 	Questions        []Question
