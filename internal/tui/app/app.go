@@ -50,13 +50,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.model.Width = msg.Width
 		a.model.Height = msg.Height
-		// Propagate to all views
-		a.homeView, _ = a.homeView.Update(msg)
-		a.interviewView, _ = a.interviewView.Update(msg)
-		a.chatView, _ = a.chatView.Update(msg)
-		a.planView, _ = a.planView.Update(msg)
-		a.executionView, _ = a.executionView.Update(msg)
-		a.dashboardView, _ = a.dashboardView.Update(msg)
+		// Only propagate to the currently active view to avoid nil pointer on uninitialized views
+		switch a.model.State {
+		case tui.StateHome:
+			a.homeView, _ = a.homeView.Update(msg)
+		case tui.StateInterview:
+			a.interviewView, _ = a.interviewView.Update(msg)
+		case tui.StateChat:
+			a.chatView, _ = a.chatView.Update(msg)
+		case tui.StateApproval:
+			a.planView, _ = a.planView.Update(msg)
+		case tui.StateExecuting:
+			a.executionView, _ = a.executionView.Update(msg)
+		case tui.StateDashboard:
+			a.dashboardView, _ = a.dashboardView.Update(msg)
+		}
 		return a, nil
 
 	case tea.KeyMsg:
