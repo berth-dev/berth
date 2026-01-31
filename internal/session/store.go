@@ -22,7 +22,7 @@ func NewStore(dbPath string) (*Store, error) {
 	}
 
 	if err := createTables(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("create tables: %w", err)
 	}
 
@@ -178,7 +178,7 @@ func (s *Store) ListSessions(limit int) ([]Summary, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query sessions: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var summaries []Summary
 	for rows.Next() {
@@ -222,7 +222,7 @@ func (s *Store) GetMessages(sessionID string) ([]Message, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query messages: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var messages []Message
 	for rows.Next() {
@@ -266,7 +266,7 @@ func (s *Store) GetAnswers(sessionID string) ([]Answer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query answers: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var answers []Answer
 	for rows.Next() {
@@ -331,7 +331,7 @@ func (s *Store) GetBeadStates(sessionID string) ([]BeadState, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query bead states: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var states []BeadState
 	for rows.Next() {
