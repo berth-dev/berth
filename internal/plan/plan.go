@@ -213,6 +213,44 @@ func padding(n int) string {
 	return strings.Repeat(" ", n)
 }
 
+// RunPlanNonInteractive generates a plan without the interactive approval loop.
+// The TUI handles approval UI separately.
+// If feedback is provided, it's incorporated into the prompt for re-planning.
+func RunPlanNonInteractive(
+	cfg config.Config,
+	requirements *Requirements,
+	graphData, runDir string,
+	isGreenfield bool,
+	feedback string,
+) (*Plan, error) {
+	stackInfo := detect.StackInfo{
+		Language:       cfg.Project.Language,
+		Framework:      cfg.Project.Framework,
+		PackageManager: cfg.Project.PackageManager,
+	}
+
+	learnings := context.ReadLearnings(runDir)
+
+	prompt := BuildPlanPrompt(requirements, stackInfo, graphData, learnings, feedback, isGreenfield)
+
+	rawOutput, err := spawnClaude(prompt)
+	if err != nil {
+		return nil, fmt.Errorf("Claude failed: %w", err)
+	}
+
+	plan, err := ParsePlan(rawOutput)
+	if err != nil {
+		return nil, fmt.Errorf("parse failed: %w", err)
+	}
+
+	// Write plan to disk for persistence
+	if err := writePlan(runDir, rawOutput); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to persist plan: %v\n", err)
+	}
+
+	return plan, nil
+}
+
 // writePlan persists the raw plan content to the run directory.
 func writePlan(runDir string, content string) error {
 	if err := os.MkdirAll(runDir, 0755); err != nil {
