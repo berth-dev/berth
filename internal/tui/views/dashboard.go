@@ -138,14 +138,14 @@ func (m DashboardModel) Update(msg tea.Msg) (DashboardModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "tab", "right", "l":
-			// Cycle to next tab
+		case "right":
+			// Cycle to next internal tab
 			m.activeTab = (m.activeTab + 1) % 3
 			m.updateViewportContent()
 			return m, nil
 
-		case "shift+tab", "left", "h":
-			// Cycle to previous tab
+		case "left":
+			// Cycle to previous internal tab
 			m.activeTab = (m.activeTab + 2) % 3 // +2 is equivalent to -1 mod 3
 			m.updateViewportContent()
 			return m, nil
@@ -308,7 +308,7 @@ func (m DashboardModel) renderFooter() string {
 	var hints []string
 
 	// Common hints
-	hints = append(hints, "Tab/h/l: Switch tabs")
+	hints = append(hints, "←/→: Switch tabs")
 
 	// Tab-specific hints
 	switch m.activeTab {

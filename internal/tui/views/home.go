@@ -43,7 +43,7 @@ type HomeModel struct {
 // NewHomeModel creates a new HomeModel with optional resume session.
 func NewHomeModel(resumeSession *session.Session, width, height int) HomeModel {
 	ti := textinput.New()
-	ti.Placeholder = "What would you like to work on?"
+	ti.Placeholder = "type something..."
 	ti.CharLimit = 2000
 	ti.Width = width - 10 // Account for padding/borders
 	ti.Focus()
@@ -127,7 +127,7 @@ func (m HomeModel) View() string {
 	b.WriteString("\n\n")
 
 	// Footer with tab hints
-	footer := tui.DimStyle.Render("Tab: Chat | Dashboard | Sessions       Ctrl+C: Exit")
+	footer := tui.DimStyle.Render("Tab: Switch tabs       Ctrl+C: Exit")
 	b.WriteString(footer)
 
 	// Wrap in box style
