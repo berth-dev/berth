@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -33,24 +33,37 @@ type ResumeSessionMsg struct {
 
 // HomeModel is the view model for the home screen.
 type HomeModel struct {
-	textInput     textinput.Model
+	textArea      textarea.Model
 	resumeSession *session.Session
 	showResume    bool
 	width         int
 	height        int
 	Err           error
+	ctrlCPending  bool
 }
+
+// maxBoxWidth is the maximum width for the home view box.
+const maxBoxWidth = 80
 
 // NewHomeModel creates a new HomeModel with optional resume session.
 func NewHomeModel(resumeSession *session.Session, width, height int) HomeModel {
-	ti := textinput.New()
-	ti.Placeholder = "type something..."
-	ti.CharLimit = 2000
-	ti.Width = width - 10 // Account for padding/borders
-	ti.Focus()
+	ta := textarea.New()
+	ta.Placeholder = "Describe what you'd like to build or work on..."
+	ta.CharLimit = 10000
+	ta.SetWidth(maxBoxWidth - 6) // Account for padding/borders
+	ta.SetHeight(1)              // Start with 1 line, will grow as needed
+	ta.Focus()
+
+	// Style the textarea
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+	ta.FocusedStyle.Text = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))
+	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#7C3AED"))
+	ta.Prompt = "> "
+	ta.ShowLineNumbers = false
 
 	return HomeModel{
-		textInput:     ti,
+		textArea:      ta,
 		resumeSession: resumeSession,
 		showResume:    resumeSession != nil,
 		width:         width,
@@ -60,7 +73,7 @@ func NewHomeModel(resumeSession *session.Session, width, height int) HomeModel {
 
 // Init returns the initial command for the home view.
 func (m HomeModel) Init() tea.Cmd {
-	return textinput.Blink
+	return textarea.Blink
 }
 
 // Update handles messages for the home view.
@@ -69,16 +82,25 @@ func (m HomeModel) Update(msg tea.Msg) (HomeModel, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case tui.KeyEnter:
-			value := strings.TrimSpace(m.textInput.Value())
+		keyStr := msg.String()
+
+		// Cmd+Enter or Ctrl+Enter submits
+		if keyStr == "ctrl+enter" || keyStr == "cmd+enter" {
+			value := strings.TrimSpace(m.textArea.Value())
 			if value != "" {
 				return m, func() tea.Msg {
 					return SubmitTaskMsg{Description: value}
 				}
 			}
-		case "r", "R":
-			if m.showResume && m.resumeSession != nil {
+			return m, nil
+		}
+
+		// Regular Enter is handled by textarea (adds newline)
+		// Don't intercept it
+
+		// Handle 'r' to resume (only if textarea is empty)
+		if keyStr == "r" || keyStr == "R" {
+			if m.showResume && m.resumeSession != nil && m.textArea.Value() == "" {
 				return m, func() tea.Msg {
 					return ResumeSessionMsg{SessionID: m.resumeSession.ID}
 				}
@@ -88,12 +110,56 @@ func (m HomeModel) Update(msg tea.Msg) (HomeModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.textInput.Width = msg.Width - 10
+		// Adjust textarea width based on box width
+		boxWidth := maxBoxWidth
+		if m.width-4 < boxWidth {
+			boxWidth = m.width - 4
+		}
+		m.textArea.SetWidth(boxWidth - 6)
 		return m, nil
 	}
 
-	m.textInput, cmd = m.textInput.Update(msg)
+	// Update textarea and adjust height based on content
+	m.textArea, cmd = m.textArea.Update(msg)
+
+	// Dynamically adjust height based on content - no clipping
+	m.adjustTextAreaHeight()
+
 	return m, cmd
+}
+
+// adjustTextAreaHeight calculates and sets the textarea height based on content.
+func (m *HomeModel) adjustTextAreaHeight() {
+	content := m.textArea.Value()
+	if content == "" {
+		m.textArea.SetHeight(1)
+		return
+	}
+
+	// Calculate visible width for wrapping
+	visibleWidth := m.textArea.Width() - 2 // Account for prompt "> "
+
+	// Count total lines including wrapped lines
+	totalLines := 0
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		if len(line) == 0 {
+			totalLines++
+		} else {
+			// Calculate how many visual lines this logical line takes
+			wrappedLines := (len(line) + visibleWidth - 1) / visibleWidth
+			if wrappedLines < 1 {
+				wrappedLines = 1
+			}
+			totalLines += wrappedLines
+		}
+	}
+
+	// Set height to fit all content (minimum 1)
+	if totalLines < 1 {
+		totalLines = 1
+	}
+	m.textArea.SetHeight(totalLines)
 }
 
 // View renders the home view.
@@ -134,28 +200,45 @@ func (m HomeModel) View() string {
 	b.WriteString(prompt)
 	b.WriteString("\n\n")
 
-	// Text input
-	b.WriteString(m.textInput.View())
+	// Text area
+	b.WriteString(m.textArea.View())
 	b.WriteString("\n\n")
 
-	// Footer with tab hints
-	footer := tui.DimStyle.Render("Tab: Switch tabs       Ctrl+C: Exit")
+	// Footer with hints
+	ctrlCHint := "Ctrl+C: Exit"
+	if m.ctrlCPending {
+		ctrlCHint = tui.WarningStyle.Render("Press Ctrl+C again to exit")
+	} else {
+		ctrlCHint = tui.DimStyle.Render(ctrlCHint)
+	}
+	footer := tui.DimStyle.Render("Cmd+Enter: Submit · Enter: New line · Tab: Switch tabs · ") + ctrlCHint
 	b.WriteString(footer)
 
-	// Wrap in box style
-	content := b.String()
-	boxed := tui.BoxStyle.
-		Width(m.width - 4).
-		Render(content)
-
-	// Center vertically if there's space
-	contentHeight := lipgloss.Height(boxed)
-	if m.height > contentHeight {
-		padding := (m.height - contentHeight) / 3 // Slight offset toward top
-		if padding > 0 {
-			boxed = strings.Repeat("\n", padding) + boxed
-		}
+	// Determine box width - use max width or screen width, whichever is smaller
+	boxWidth := maxBoxWidth
+	if m.width-4 < boxWidth {
+		boxWidth = m.width - 4
 	}
 
+	// Wrap in box style with fixed max width
+	content := b.String()
+	boxed := tui.BoxStyle.
+		Width(boxWidth).
+		Render(content)
+
 	return boxed
+}
+
+// GetBoxWidth returns the actual box width used for centering calculations.
+func (m HomeModel) GetBoxWidth() int {
+	boxWidth := maxBoxWidth
+	if m.width-4 < boxWidth {
+		boxWidth = m.width - 4
+	}
+	return boxWidth + 4 // Account for border
+}
+
+// SetCtrlCPending sets the Ctrl+C pending state for display.
+func (m *HomeModel) SetCtrlCPending(pending bool) {
+	m.ctrlCPending = pending
 }
