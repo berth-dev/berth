@@ -4,6 +4,7 @@ package app
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,6 +17,8 @@ import (
 	"github.com/berth-dev/berth/internal/tui/commands"
 	"github.com/berth-dev/berth/internal/tui/views"
 )
+
+const analyzingTimeout = 5 * time.Minute
 
 // App is the main TUI application that wires all views together.
 type App struct {
@@ -54,21 +57,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.model.Width = msg.Width
 		a.model.Height = msg.Height
 		// Only propagate to the currently active view to avoid nil pointer on uninitialized views
+		var cmd tea.Cmd
 		switch a.model.State {
 		case tui.StateHome:
-			a.homeView, _ = a.homeView.Update(msg)
+			a.homeView, cmd = a.homeView.Update(msg)
 		case tui.StateInterview:
-			a.interviewView, _ = a.interviewView.Update(msg)
+			a.interviewView, cmd = a.interviewView.Update(msg)
 		case tui.StateChat:
-			a.chatView, _ = a.chatView.Update(msg)
+			a.chatView, cmd = a.chatView.Update(msg)
 		case tui.StateApproval:
-			a.planView, _ = a.planView.Update(msg)
+			a.planView, cmd = a.planView.Update(msg)
 		case tui.StateExecuting:
-			a.executionView, _ = a.executionView.Update(msg)
+			a.executionView, cmd = a.executionView.Update(msg)
 		case tui.StateDashboard:
-			a.dashboardView, _ = a.dashboardView.Update(msg)
+			a.dashboardView, cmd = a.dashboardView.Update(msg)
 		}
-		return a, nil
+		return a, cmd
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -168,11 +172,14 @@ func (a *App) updateHome(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle messages from home view
 	switch msg := msg.(type) {
 	case views.SubmitTaskMsg:
+		a.model.Err = nil
+		a.homeView.Err = nil
 		return a, a.transitionToAnalyzing(msg.Description)
 
 	case views.ResumeSessionMsg:
-		// TODO: Load session and resume from appropriate state
-		_ = msg.SessionID
+		// Session resume is not yet implemented
+		a.model.Err = fmt.Errorf("session resume not yet available (session: %s)", msg.SessionID)
+		a.homeView.Err = a.model.Err
 		return a, nil
 	}
 
@@ -185,7 +192,21 @@ func (a *App) updateAnalyzing(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
 		a.model.Spinner, cmd = a.model.Spinner.Update(msg)
+		if !a.model.AnalyzingStartTime.IsZero() && time.Since(a.model.AnalyzingStartTime) > analyzingTimeout {
+			a.model.Err = fmt.Errorf("operation timed out after %v", analyzingTimeout)
+			a.homeView.Err = a.model.Err
+			a.model.State = tui.StateHome
+			a.model.AnalyzingStartTime = time.Time{}
+			return a, nil
+		}
 		return a, cmd
+
+	case tui.OperationTimeoutMsg:
+		a.model.Err = fmt.Errorf("operation %q timed out", msg.Operation)
+		a.homeView.Err = a.model.Err
+		a.model.State = tui.StateHome
+		a.model.AnalyzingStartTime = time.Time{}
+		return a, nil
 
 	case tui.AnalysisCompleteMsg:
 		a.transitionToInterview(msg.Questions)
@@ -200,9 +221,17 @@ func (a *App) updateAnalyzing(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.transitionToInterview(msg.Questions)
 		return a, a.interviewView.Init()
 
+	case tui.InterviewReadyMsg:
+		// Composite message: store session and transition to interview in one step.
+		// This replaces the tea.Batch()() pattern that was causing context issues.
+		a.model.InterviewSession = msg.Session
+		a.transitionToInterview(msg.Questions)
+		return a, a.interviewView.Init()
+
 	case tui.InterviewCompleteMsg:
 		a.model.Requirements = msg.Requirements
 		a.model.State = tui.StateAnalyzing // show spinner while generating plan
+		a.model.AnalyzingStartTime = time.Now()
 		return a, tea.Batch(
 			a.model.Spinner.Tick,
 			commands.GeneratePlanCmd(
@@ -220,11 +249,31 @@ func (a *App) updateAnalyzing(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tui.PlanErrorMsg:
 		a.model.Err = msg.Err
+		a.homeView.Err = msg.Err
 		a.model.State = tui.StateHome
 		return a, nil
 
 	case tui.InterviewErrorMsg:
 		a.model.Err = msg.Err
+		a.homeView.Err = msg.Err
+		a.model.State = tui.StateHome
+		return a, nil
+
+	case tui.SessionErrorMsg:
+		a.model.Err = msg.Err
+		a.homeView.Err = msg.Err
+		a.model.State = tui.StateHome
+		return a, nil
+
+	case tui.ClaudeErrorMsg:
+		a.model.Err = msg.Err
+		a.homeView.Err = msg.Err
+		a.model.State = tui.StateHome
+		return a, nil
+
+	case tui.ErrorMsg:
+		a.model.Err = msg.Err
+		a.homeView.Err = msg.Err
 		a.model.State = tui.StateHome
 		return a, nil
 	}
@@ -256,6 +305,7 @@ func (a *App) updateInterview(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// All questions in this round answered - process and get next round or complete
 		a.model.State = tui.StateAnalyzing
+		a.model.AnalyzingStartTime = time.Now()
 		return a, tea.Batch(
 			a.model.Spinner.Tick,
 			commands.ProcessAnswersCmd(a.model.InterviewSession, a.model.Answers),
@@ -263,6 +313,7 @@ func (a *App) updateInterview(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tui.EnterChatMsg:
 		// Transition to chat mode for this question
+		a.model.InChatMode = true
 		a.model.State = tui.StateChat
 		a.chatView = views.NewChatModel(
 			msg.QuestionID,
@@ -275,6 +326,7 @@ func (a *App) updateInterview(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.SkipInterviewMsg:
 		// Skip remaining questions and go directly to planning
 		a.model.State = tui.StateAnalyzing
+		a.model.AnalyzingStartTime = time.Now()
 		return a, tea.Batch(
 			a.model.Spinner.Tick,
 			commands.ProcessAnswersCmd(a.model.InterviewSession, a.model.Answers),
@@ -288,16 +340,21 @@ func (a *App) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	a.chatView, cmd = a.chatView.Update(msg)
 
-	switch msg := msg.(type) {
+	switch msg.(type) {
 	case views.SendChatMsg:
-		// TODO: Send message to Claude and get response
-		_ = msg.Content
-		return a, cmd
+		// Chat feature is not yet fully implemented
+		// Return a placeholder response for now
+		return a, func() tea.Msg {
+			return views.ChatResponseMsg{
+				Content: "Chat feature is not yet available. Please use the interview flow to provide answers.",
+			}
+		}
 
 	case views.ExitChatMsg:
 		// Return to previous state (interview or execution)
 		if a.model.InChatMode {
 			a.model.State = tui.StateInterview
+			a.model.InChatMode = false
 		}
 		return a, nil
 	}
@@ -345,6 +402,7 @@ func (a *App) updateApproval(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tui.RejectMsg:
 		a.model.State = tui.StateAnalyzing
+		a.model.AnalyzingStartTime = time.Now()
 		return a, tea.Batch(
 			a.model.Spinner.Tick,
 			commands.RegeneratePlanCmd(
@@ -438,8 +496,10 @@ func (a *App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case views.LoadSessionMsg:
-		// TODO: Load session and resume
-		_ = msg.SessionID
+		// Session resume is not yet implemented
+		a.model.Err = fmt.Errorf("session resume not yet available (session: %s)", msg.SessionID)
+		a.homeView.Err = a.model.Err
+		a.model.State = tui.StateHome
 		return a, nil
 
 	case tui.ArchitectureDiagramMsg:
@@ -474,6 +534,7 @@ func (a *App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 // transitionToAnalyzing initiates the analysis phase and starts the interview.
 func (a *App) transitionToAnalyzing(description string) tea.Cmd {
 	a.model.State = tui.StateAnalyzing
+	a.model.AnalyzingStartTime = time.Now()
 
 	// Add initial system message
 	a.model.ChatHistory = append(a.model.ChatHistory, tui.ChatMessage{
@@ -499,6 +560,8 @@ func (a *App) transitionToInterview(questions []tui.Question) {
 	a.model.State = tui.StateInterview
 	a.model.Questions = questions
 	a.model.CurrentQ = 0
+	a.model.Answers = nil              // Clear answers for new round
+	a.model.AnalyzingStartTime = time.Time{} // Reset timeout tracker
 
 	if len(questions) > 0 {
 		a.interviewView = views.NewInterviewModel(
@@ -514,6 +577,7 @@ func (a *App) TransitionToApproval(plan *tui.Plan, groups []tui.ExecutionGroup) 
 	a.model.State = tui.StateApproval
 	a.model.Plan = plan
 	a.model.Groups = groups
+	a.model.AnalyzingStartTime = time.Time{} // Reset timeout tracker
 
 	a.planView = views.NewPlanModel(
 		plan,
