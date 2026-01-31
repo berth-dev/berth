@@ -184,6 +184,15 @@ type InterviewQuestionsMsg struct {
 	Round     int
 }
 
+// InterviewReadyMsg is a composite message that contains both the session and
+// the first set of questions. This avoids the need to return multiple messages
+// from StartInterviewCmd, which was causing context cancellation issues.
+type InterviewReadyMsg struct {
+	Session   *understand.InterviewSession
+	Questions []Question
+	Round     int
+}
+
 // InterviewCompleteMsg signals that the interview is done with requirements.
 type InterviewCompleteMsg struct {
 	Requirements *understand.Requirements
@@ -224,6 +233,11 @@ type TickMsg struct{}
 // ErrorMsg is a generic error message for unrecoverable errors.
 type ErrorMsg struct {
 	Err error
+}
+
+// OperationTimeoutMsg signals that an operation has timed out.
+type OperationTimeoutMsg struct {
+	Operation string
 }
 
 // WindowSizeMsg signals that the terminal window has been resized.

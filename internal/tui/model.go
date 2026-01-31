@@ -27,11 +27,8 @@ const (
 	StateChat
 	StateApproval
 	StateExecuting
-	StateDiagnosing
-	StatePaused
 	StateComplete
 	StateDashboard
-	StateSessions
 )
 
 // Tab represents the active tab in the TUI.
@@ -128,9 +125,10 @@ type SessionInfo struct {
 // Model is the main TUI model that holds all application state.
 type Model struct {
 	// State management
-	State     ViewState
-	ActiveTab Tab
-	Err       error
+	State              ViewState
+	ActiveTab          Tab
+	Err                error
+	AnalyzingStartTime time.Time
 
 	// Configuration
 	Cfg         *config.Config
