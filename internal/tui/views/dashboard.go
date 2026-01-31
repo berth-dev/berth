@@ -1,0 +1,329 @@
+// Package views provides TUI view components for the Berth application.
+package views
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/berth-dev/berth/internal/tui"
+)
+
+// ============================================================================
+// Message Types
+// ============================================================================
+
+// LoadSessionMsg is sent when the user selects a session to load.
+type LoadSessionMsg struct {
+	SessionID string
+}
+
+// DeleteSessionMsg is sent when the user requests to delete a session.
+type DeleteSessionMsg struct {
+	SessionID string
+}
+
+// ============================================================================
+// SessionItem
+// ============================================================================
+
+// SessionItem implements list.Item for the session list.
+type SessionItem struct {
+	session tui.SessionInfo
+}
+
+// NewSessionItem creates a new SessionItem from a SessionInfo.
+func NewSessionItem(s tui.SessionInfo) SessionItem {
+	return SessionItem{session: s}
+}
+
+// Title returns the session name/task for list display.
+func (i SessionItem) Title() string {
+	return i.session.Name
+}
+
+// Description returns the session status and date for list display.
+func (i SessionItem) Description() string {
+	return fmt.Sprintf("%s - %s (%d beads)",
+		i.session.Status,
+		i.session.CreatedAt.Format("Jan 02, 2006 15:04"),
+		i.session.BeadCount,
+	)
+}
+
+// FilterValue returns the value used for filtering in the list.
+func (i SessionItem) FilterValue() string {
+	return i.session.Name
+}
+
+// ============================================================================
+// DashboardModel
+// ============================================================================
+
+// DashboardModel is the view model for the dashboard screen.
+type DashboardModel struct {
+	activeTab   int // 0=Architecture, 1=Learnings, 2=Sessions
+	diagram     string
+	learnings   []string
+	sessions    []tui.SessionInfo
+	sessionList list.Model
+	viewport    viewport.Model
+	width       int
+	height      int
+}
+
+// NewDashboardModel creates a new DashboardModel with the given data.
+func NewDashboardModel(diagram string, learnings []string, sessions []tui.SessionInfo, width, height int) DashboardModel {
+	// Initialize viewport for diagram/learnings
+	// Reserve space for tab bar (2 lines), footer (2 lines), and box padding
+	contentHeight := height - 10
+	if contentHeight < 5 {
+		contentHeight = 5
+	}
+	contentWidth := width - 8
+	if contentWidth < 20 {
+		contentWidth = 20
+	}
+
+	vp := viewport.New(contentWidth, contentHeight)
+	vp.SetContent(diagram)
+
+	// Initialize session list
+	items := make([]list.Item, len(sessions))
+	for i, s := range sessions {
+		items[i] = SessionItem{session: s}
+	}
+
+	// Configure list delegate for better display
+	delegate := list.NewDefaultDelegate()
+	delegate.ShowDescription = true
+	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
+		Foreground(lipgloss.Color("#7C3AED")).
+		BorderForeground(lipgloss.Color("#7C3AED"))
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
+		Foreground(lipgloss.Color("#9CA3AF"))
+
+	l := list.New(items, delegate, contentWidth, contentHeight)
+	l.Title = "Sessions"
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(true)
+	l.SetShowHelp(false)
+
+	return DashboardModel{
+		activeTab:   0,
+		diagram:     diagram,
+		learnings:   learnings,
+		sessions:    sessions,
+		sessionList: l,
+		viewport:    vp,
+		width:       width,
+		height:      height,
+	}
+}
+
+// Init returns the initial command for the dashboard view.
+func (m DashboardModel) Init() tea.Cmd {
+	return nil
+}
+
+// Update handles messages for the dashboard view.
+func (m DashboardModel) Update(msg tea.Msg) (DashboardModel, tea.Cmd) {
+	var cmd tea.Cmd
+	var cmds []tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "tab", "right", "l":
+			// Cycle to next tab
+			m.activeTab = (m.activeTab + 1) % 3
+			m.updateViewportContent()
+			return m, nil
+
+		case "shift+tab", "left", "h":
+			// Cycle to previous tab
+			m.activeTab = (m.activeTab + 2) % 3 // +2 is equivalent to -1 mod 3
+			m.updateViewportContent()
+			return m, nil
+
+		case "enter":
+			// If on sessions tab and a session is selected, return LoadSessionMsg
+			if m.activeTab == 2 {
+				if item, ok := m.sessionList.SelectedItem().(SessionItem); ok {
+					return m, func() tea.Msg {
+						return LoadSessionMsg{SessionID: item.session.ID}
+					}
+				}
+			}
+			return m, nil
+
+		case "d":
+			// If on sessions tab, return DeleteSessionMsg for selected session
+			if m.activeTab == 2 {
+				if item, ok := m.sessionList.SelectedItem().(SessionItem); ok {
+					return m, func() tea.Msg {
+						return DeleteSessionMsg{SessionID: item.session.ID}
+					}
+				}
+			}
+			return m, nil
+		}
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+
+		// Recalculate content dimensions
+		contentHeight := m.height - 10
+		if contentHeight < 5 {
+			contentHeight = 5
+		}
+		contentWidth := m.width - 8
+		if contentWidth < 20 {
+			contentWidth = 20
+		}
+
+		m.viewport.Width = contentWidth
+		m.viewport.Height = contentHeight
+		m.sessionList.SetWidth(contentWidth)
+		m.sessionList.SetHeight(contentHeight)
+		m.updateViewportContent()
+		return m, nil
+	}
+
+	// Pass messages to the appropriate component based on active tab
+	switch m.activeTab {
+	case 0, 1:
+		// Architecture or Learnings tab - use viewport
+		m.viewport, cmd = m.viewport.Update(msg)
+		cmds = append(cmds, cmd)
+	case 2:
+		// Sessions tab - use list
+		m.sessionList, cmd = m.sessionList.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+
+	return m, tea.Batch(cmds...)
+}
+
+// updateViewportContent updates the viewport content based on the active tab.
+func (m *DashboardModel) updateViewportContent() {
+	switch m.activeTab {
+	case 0:
+		m.viewport.SetContent(m.diagram)
+	case 1:
+		if len(m.learnings) == 0 {
+			m.viewport.SetContent("")
+		} else {
+			m.viewport.SetContent(strings.Join(m.learnings, "\n\n"))
+		}
+	}
+}
+
+// View renders the dashboard view.
+func (m DashboardModel) View() string {
+	var b strings.Builder
+
+	// Header
+	header := tui.TitleStyle.Render("Dashboard")
+	b.WriteString(header)
+	b.WriteString("\n\n")
+
+	// Tab bar
+	b.WriteString(renderTabs(m.activeTab))
+	b.WriteString("\n\n")
+
+	// Content based on active tab
+	switch m.activeTab {
+	case 0:
+		// Architecture diagram
+		if m.diagram == "" {
+			b.WriteString(tui.DimStyle.Render("No architecture data available"))
+		} else {
+			b.WriteString(m.viewport.View())
+		}
+
+	case 1:
+		// Learnings
+		if len(m.learnings) == 0 {
+			b.WriteString(tui.DimStyle.Render("No learnings yet"))
+		} else {
+			b.WriteString(m.viewport.View())
+		}
+
+	case 2:
+		// Sessions list
+		if len(m.sessions) == 0 {
+			b.WriteString(tui.DimStyle.Render("No sessions yet"))
+		} else {
+			b.WriteString(m.sessionList.View())
+		}
+	}
+
+	b.WriteString("\n\n")
+
+	// Footer with relevant keybindings per tab
+	b.WriteString(m.renderFooter())
+
+	// Wrap in box style
+	content := b.String()
+	boxed := tui.BoxStyle.
+		Width(m.width - 4).
+		Render(content)
+
+	// Center vertically if there's space
+	contentHeight := lipgloss.Height(boxed)
+	if m.height > contentHeight {
+		padding := (m.height - contentHeight) / 3
+		if padding > 0 {
+			boxed = strings.Repeat("\n", padding) + boxed
+		}
+	}
+
+	return boxed
+}
+
+// renderTabs renders the tab bar with active highlighting.
+func renderTabs(activeTab int) string {
+	tabs := []string{"Architecture", "Learnings", "Sessions"}
+	var rendered []string
+
+	for i, tab := range tabs {
+		if i == activeTab {
+			rendered = append(rendered, tui.ActiveTabStyle.Render(tab))
+		} else {
+			rendered = append(rendered, tui.InactiveTabStyle.Render(tab))
+		}
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
+}
+
+// renderFooter renders the footer with relevant keybindings for the current tab.
+func (m DashboardModel) renderFooter() string {
+	var hints []string
+
+	// Common hints
+	hints = append(hints, "Tab/h/l: Switch tabs")
+
+	// Tab-specific hints
+	switch m.activeTab {
+	case 0, 1:
+		// Architecture or Learnings - viewport controls
+		hints = append(hints, "j/k: Scroll")
+	case 2:
+		// Sessions
+		hints = append(hints, "Enter: Load session")
+		hints = append(hints, "d: Delete session")
+		hints = append(hints, "/: Filter")
+	}
+
+	// Exit hint
+	hints = append(hints, "Ctrl+C: Exit")
+
+	return tui.DimStyle.Render(strings.Join(hints, "   "))
+}
