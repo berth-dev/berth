@@ -11,6 +11,7 @@ import (
 
 	"github.com/berth-dev/berth/internal/config"
 	"github.com/berth-dev/berth/internal/tui"
+	"github.com/berth-dev/berth/internal/tui/commands"
 	"github.com/berth-dev/berth/internal/tui/views"
 )
 
@@ -187,6 +188,25 @@ func (a *App) updateAnalyzing(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tui.AnalysisCompleteMsg:
 		a.transitionToInterview(msg.Questions)
 		return a, a.interviewView.Init()
+
+	case tui.InterviewStartedMsg:
+		a.model.InterviewSession = msg.Session
+		return a, nil
+
+	case tui.InterviewQuestionsMsg:
+		// Transition to interview state with questions
+		a.transitionToInterview(msg.Questions)
+		return a, a.interviewView.Init()
+
+	case tui.InterviewCompleteMsg:
+		a.model.Requirements = msg.Requirements
+		// TODO: Transition to plan generation (will be implemented in TUI-12)
+		return a, nil
+
+	case tui.InterviewErrorMsg:
+		a.model.Err = msg.Err
+		a.model.State = tui.StateHome
+		return a, nil
 	}
 
 	return a, nil
@@ -342,7 +362,7 @@ func (a *App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 // State Transitions
 // ============================================================================
 
-// transitionToAnalyzing initiates the analysis phase.
+// transitionToAnalyzing initiates the analysis phase and starts the interview.
 func (a *App) transitionToAnalyzing(description string) tea.Cmd {
 	a.model.State = tui.StateAnalyzing
 
@@ -352,8 +372,17 @@ func (a *App) transitionToAnalyzing(description string) tea.Cmd {
 		Content: fmt.Sprintf("Task: %s", description),
 	})
 
-	// Start spinner
-	return a.model.Spinner.Tick
+	// Start spinner and interview command
+	return tea.Batch(
+		a.model.Spinner.Tick,
+		commands.StartInterviewCmd(
+			*a.model.Cfg,
+			a.model.StackInfo,
+			description,
+			a.model.RunDir,
+			a.model.GraphSummary,
+		),
+	)
 }
 
 // transitionToInterview sets up the interview phase with questions.
