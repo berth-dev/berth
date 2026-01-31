@@ -172,21 +172,22 @@ func BuildPlanPrompt(requirements *Requirements, stackInfo detect.StackInfo, gra
 
 ## Bead Sizing Guidelines
 
-Right-size the number of beads to task complexity:
-- Trivial (rename, config change, add a flag): 1 bead
-- Simple (one endpoint, one bug fix, one component): 1-2 beads
-- Medium (new feature, 3-5 files): 2-4 beads
-- Large (cross-cutting refactor, new subsystem): 5+ beads
+Match bead count to task complexity:
 
-Do NOT over-split. If one Claude session could complete the work in a single focused pass, it is one bead.
+- **Simple tasks** (single feature, <5 files): 1-2 beads maximum
+  Example: "Add hello world HTTP server" → 1 bead
 
-Signs of too many beads:
-- Multiple beads each touching only 1 file with trivial changes
-- Beads that just "update imports" or "fix lint" after another bead
-- A chain of 3+ sequential beads where each depends on the previous
-- A bead whose only job is to run a command (e.g. "npm install")
+- **Medium tasks** (multiple features, 5-15 files): 3-6 beads
+  Example: "Add user authentication" → 4 beads
 
-Never create a bead that only installs dependencies. Include installation as part of the setup bead.
+- **Complex tasks** (cross-cutting, >15 files): 7-15 beads
+  Example: "Refactor API to use DI" → 10 beads
+
+Rules:
+- Never create a bead that only runs a command
+- Combine setup into implementation beads
+- Each bead produces meaningful, testable output
+- Fewer larger beads > many tiny beads
 
 ## Output Format
 
