@@ -10,7 +10,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/berth-dev/berth/internal/graph"
+	"github.com/berth-dev/berth/internal/session"
 	"github.com/berth-dev/berth/internal/tui"
+	"github.com/berth-dev/berth/internal/tui/commands"
 )
 
 // ============================================================================
@@ -74,10 +77,24 @@ type DashboardModel struct {
 	viewport    viewport.Model
 	width       int
 	height      int
+
+	// Dependencies for loading data
+	kgClient    *graph.Client
+	store       *session.Store
+	projectRoot string
+	rootFile    string
 }
 
-// NewDashboardModel creates a new DashboardModel with the given data.
-func NewDashboardModel(diagram string, learnings []string, sessions []tui.SessionInfo, width, height int) DashboardModel {
+// DashboardDeps holds the dependencies needed by the dashboard view.
+type DashboardDeps struct {
+	KGClient    *graph.Client
+	Store       *session.Store
+	ProjectRoot string
+	RootFile    string
+}
+
+// NewDashboardModel creates a new DashboardModel with the given data and dependencies.
+func NewDashboardModel(diagram string, learnings []string, sessions []tui.SessionInfo, width, height int, deps *DashboardDeps) DashboardModel {
 	// Initialize viewport for diagram/learnings
 	// Reserve space for tab bar (2 lines), footer (2 lines), and box padding
 	contentHeight := height - 10
@@ -113,7 +130,7 @@ func NewDashboardModel(diagram string, learnings []string, sessions []tui.Sessio
 	l.SetFilteringEnabled(true)
 	l.SetShowHelp(false)
 
-	return DashboardModel{
+	m := DashboardModel{
 		activeTab:   0,
 		diagram:     diagram,
 		learnings:   learnings,
@@ -123,11 +140,26 @@ func NewDashboardModel(diagram string, learnings []string, sessions []tui.Sessio
 		width:       width,
 		height:      height,
 	}
+
+	// Set dependencies if provided
+	if deps != nil {
+		m.kgClient = deps.KGClient
+		m.store = deps.Store
+		m.projectRoot = deps.ProjectRoot
+		m.rootFile = deps.RootFile
+	}
+
+	return m
 }
 
 // Init returns the initial command for the dashboard view.
+// It triggers loading of architecture diagram, learnings, and sessions.
 func (m DashboardModel) Init() tea.Cmd {
-	return nil
+	return tea.Batch(
+		commands.LoadDiagramCmd(m.kgClient, m.rootFile),
+		commands.LoadLearningsCmd(m.projectRoot),
+		commands.LoadSessionsCmd(m.store, 20),
+	)
 }
 
 // Update handles messages for the dashboard view.
@@ -192,6 +224,43 @@ func (m DashboardModel) Update(msg tea.Msg) (DashboardModel, tea.Cmd) {
 		m.sessionList.SetWidth(contentWidth)
 		m.sessionList.SetHeight(contentHeight)
 		m.updateViewportContent()
+		return m, nil
+
+	case tui.ArchitectureDiagramMsg:
+		if msg.Err != nil {
+			m.diagram = "Architecture unavailable: " + msg.Err.Error()
+		} else {
+			m.diagram = msg.Diagram
+		}
+		if m.activeTab == 0 {
+			m.updateViewportContent()
+		}
+		return m, nil
+
+	case tui.LearningsLoadMsg:
+		if msg.Err != nil {
+			m.learnings = []string{"Learnings unavailable: " + msg.Err.Error()}
+		} else {
+			m.learnings = msg.Learnings
+		}
+		if m.activeTab == 1 {
+			m.updateViewportContent()
+		}
+		return m, nil
+
+	case tui.SessionsLoadMsg:
+		if msg.Err != nil {
+			// Handle error - show empty sessions with error state
+			m.sessions = nil
+		} else {
+			m.sessions = msg.Sessions
+			// Update session list items
+			items := make([]list.Item, len(m.sessions))
+			for i, s := range m.sessions {
+				items[i] = SessionItem{session: s}
+			}
+			m.sessionList.SetItems(items)
+		}
 		return m, nil
 	}
 

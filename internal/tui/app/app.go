@@ -11,6 +11,7 @@ import (
 
 	"github.com/berth-dev/berth/internal/config"
 	"github.com/berth-dev/berth/internal/execute"
+	"github.com/berth-dev/berth/internal/session"
 	"github.com/berth-dev/berth/internal/tui"
 	"github.com/berth-dev/berth/internal/tui/commands"
 	"github.com/berth-dev/berth/internal/tui/views"
@@ -76,8 +77,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case tui.KeyTab:
 			// Always cycle through tabs - Tab isn't needed for single-line inputs
-			a.cycleTab()
-			return a, nil
+			cmd := a.cycleTab()
+			return a, cmd
 		}
 	}
 
@@ -434,6 +435,27 @@ func (a *App) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// TODO: Load session and resume
 		_ = msg.SessionID
 		return a, nil
+
+	case tui.ArchitectureDiagramMsg:
+		// Cache diagram in model for future use
+		if msg.Err == nil {
+			a.model.Diagram = msg.Diagram
+		}
+		return a, cmd
+
+	case tui.LearningsLoadMsg:
+		// Cache learnings in model for future use
+		if msg.Err == nil {
+			a.model.Learnings = msg.Learnings
+		}
+		return a, cmd
+
+	case tui.SessionsLoadMsg:
+		// Cache sessions in model for future use
+		if msg.Err == nil {
+			a.model.Sessions = msg.Sessions
+		}
+		return a, cmd
 	}
 
 	return a, cmd
@@ -539,21 +561,67 @@ func (a *App) updateBeadStatus(beadID string, status string) {
 }
 
 // cycleTab cycles through available tabs (Chat ↔ Dashboard).
-func (a *App) cycleTab() {
+// Returns a command to initialize the new view if needed.
+func (a *App) cycleTab() tea.Cmd {
 	switch a.model.ActiveTab {
 	case tui.TabChat:
 		a.model.ActiveTab = tui.TabDashboard
 		a.model.State = tui.StateDashboard
+
+		// Build dependencies for dashboard
+		deps := &views.DashboardDeps{
+			KGClient:    a.model.KGClient,
+			ProjectRoot: a.model.ProjectRoot,
+		}
+
+		// Type assert Store if available
+		if store, ok := a.model.Store.(*session.Store); ok {
+			deps.Store = store
+		}
+
+		// Determine root file for architecture diagram
+		// Use a sensible default based on detected stack
+		deps.RootFile = a.determineRootFile()
+
 		a.dashboardView = views.NewDashboardModel(
 			a.model.Diagram,
 			a.model.Learnings,
 			a.model.Sessions,
 			a.model.Width,
 			a.model.Height,
+			deps,
 		)
+
+		// Return Init command to load dashboard data
+		return a.dashboardView.Init()
+
 	case tui.TabDashboard:
 		a.model.ActiveTab = tui.TabChat
 		a.model.State = tui.StateHome
+	}
+
+	return nil
+}
+
+// determineRootFile returns the root file path for architecture diagram.
+// It uses a sensible default based on the detected stack.
+func (a *App) determineRootFile() string {
+	// Use stack info to determine entry point
+	switch a.model.StackInfo.Language {
+	case "go":
+		return "main.go"
+	case "typescript", "javascript":
+		if a.model.StackInfo.Framework == "next" {
+			return "app/page.tsx"
+		}
+		return "src/index.ts"
+	case "python":
+		return "main.py"
+	case "rust":
+		return "src/main.rs"
+	default:
+		// Return empty string - LoadDiagramCmd handles nil/empty gracefully
+		return ""
 	}
 }
 
