@@ -168,6 +168,11 @@ type PlanErrorMsg struct {
 	Err error
 }
 
+// PlanRegenerateMsg requests re-planning with user feedback.
+type PlanRegenerateMsg struct {
+	Feedback string
+}
+
 // ============================================================================
 // Utility Messages
 // ============================================================================
