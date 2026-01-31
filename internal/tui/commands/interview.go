@@ -3,6 +3,8 @@ package commands
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -39,18 +41,15 @@ func StartInterviewCmd(
 			return tui.InterviewStartedMsg{Session: session}
 		}
 
-		// Return a batch of messages: first the session, then the questions
-		return tea.Batch(
-			func() tea.Msg {
-				return tui.InterviewStartedMsg{Session: session}
-			},
-			func() tea.Msg {
-				return tui.InterviewQuestionsMsg{
-					Questions: tuiQuestions,
-					Round:     session.CurrentRound,
-				}
-			},
-		)()
+		// Return a single composite message containing both session and questions.
+		// This avoids the tea.Batch()() anti-pattern which caused context
+		// cancellation issues by immediately invoking the batch instead of
+		// returning it to the Bubble Tea runtime.
+		return tui.InterviewReadyMsg{
+			Session:   session,
+			Questions: tuiQuestions,
+			Round:     session.CurrentRound,
+		}
 	}
 }
 
@@ -60,6 +59,19 @@ func StartInterviewCmd(
 // done, or InterviewErrorMsg on failure.
 func ProcessAnswersCmd(session *understand.InterviewSession, answers []tui.Answer) tea.Cmd {
 	return func() tea.Msg {
+		// Validate answers before processing
+		if len(answers) == 0 {
+			return tui.InterviewErrorMsg{Err: fmt.Errorf("no answers provided")}
+		}
+		for i, a := range answers {
+			if strings.TrimSpace(a.Value) == "" {
+				return tui.InterviewErrorMsg{Err: fmt.Errorf("answer %d (ID: %s) is empty", i+1, a.ID)}
+			}
+			if strings.TrimSpace(a.ID) == "" {
+				return tui.InterviewErrorMsg{Err: fmt.Errorf("answer %d has no question ID", i+1)}
+			}
+		}
+
 		// Convert tui.Answer to understand.Answer
 		understandAnswers := convertToUnderstandAnswers(answers)
 
