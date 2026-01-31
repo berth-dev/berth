@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"github.com/berth-dev/berth/internal/execute"
 	"github.com/berth-dev/berth/internal/session"
 	"github.com/berth-dev/berth/internal/understand"
 )
@@ -30,6 +31,46 @@ type ApproveMsg struct{}
 // RejectMsg signals that the user rejected the plan with feedback.
 type RejectMsg struct {
 	Feedback string
+}
+
+// ============================================================================
+// Execution Messages
+// ============================================================================
+
+// ExecutionStartedMsg signals execution has begun.
+type ExecutionStartedMsg struct{}
+
+// ExecutionEventMsg wraps streaming events from execution.
+type ExecutionEventMsg struct {
+	Event execute.StreamEvent
+}
+
+// ExecutionCompleteMsg signals all beads are done.
+type ExecutionCompleteMsg struct {
+	Completed int
+	Failed    int
+	Skipped   int
+	Total     int
+}
+
+// BeadRunningMsg signals a bead has started.
+type BeadRunningMsg struct {
+	BeadID     string
+	AttemptNum int
+}
+
+// BeadStuckMsg signals a bead needs intervention.
+type BeadStuckMsg struct {
+	BeadID  string
+	Error   string
+	Options []string
+}
+
+// GroupStartMsg signals a parallel group started.
+type GroupStartMsg struct {
+	GroupIndex int
+	IsParallel bool
+	BeadIDs    []string
 }
 
 // ============================================================================
