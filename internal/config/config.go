@@ -20,6 +20,7 @@ type Config struct {
 	KnowledgeGraph KGConfig        `yaml:"knowledge_graph"`
 	Beads          BeadsConfig     `yaml:"beads"`
 	Cleanup        CleanupConfig   `yaml:"cleanup"`
+	TUI            TUIConfig       `yaml:"tui"`
 }
 
 // ProjectConfig holds project metadata detected or supplied during init.
@@ -61,6 +62,12 @@ type BeadsConfig struct {
 // CleanupConfig controls automatic cleanup of old run directories.
 type CleanupConfig struct {
 	MaxAgeDays int `yaml:"max_age_days"` // 0 = disable auto-prune
+}
+
+// TUIConfig controls terminal UI settings.
+type TUIConfig struct {
+	Enabled bool   `yaml:"enabled"` // Use TUI when available
+	Theme   string `yaml:"theme"`   // "dark", "light"
 }
 
 // VerifyConfig controls the verification pipeline settings.
@@ -143,6 +150,10 @@ func DefaultConfig() *Config {
 		},
 		Cleanup: CleanupConfig{
 			MaxAgeDays: 30,
+		},
+		TUI: TUIConfig{
+			Enabled: true,
+			Theme:   "dark",
 		},
 	}
 }
