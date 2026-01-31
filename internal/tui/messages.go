@@ -3,6 +3,7 @@ package tui
 
 import (
 	"github.com/berth-dev/berth/internal/session"
+	"github.com/berth-dev/berth/internal/understand"
 )
 
 // ============================================================================
@@ -125,6 +126,31 @@ type AnalysisCompleteMsg struct {
 type RequirementsCompleteMsg struct {
 	Title   string
 	Content string
+}
+
+// ============================================================================
+// Interview Messages
+// ============================================================================
+
+// InterviewStartedMsg signals that an interview session has been initialized.
+type InterviewStartedMsg struct {
+	Session *understand.InterviewSession
+}
+
+// InterviewQuestionsMsg provides questions for the current round.
+type InterviewQuestionsMsg struct {
+	Questions []Question // uses existing tui.Question type
+	Round     int
+}
+
+// InterviewCompleteMsg signals that the interview is done with requirements.
+type InterviewCompleteMsg struct {
+	Requirements *understand.Requirements
+}
+
+// InterviewErrorMsg signals an interview error.
+type InterviewErrorMsg struct {
+	Err error
 }
 
 // ============================================================================

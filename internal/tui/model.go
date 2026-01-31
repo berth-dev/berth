@@ -13,6 +13,7 @@ import (
 	"github.com/berth-dev/berth/internal/config"
 	"github.com/berth-dev/berth/internal/detect"
 	"github.com/berth-dev/berth/internal/graph"
+	"github.com/berth-dev/berth/internal/understand"
 )
 
 // ViewState represents the current state of the TUI.
@@ -147,11 +148,13 @@ type Model struct {
 	GraphSummary string
 
 	// Interview state
-	ChatHistory []ChatMessage
-	Questions   []Question
-	Answers     []Answer
-	CurrentQ    int
-	InChatMode  bool
+	ChatHistory      []ChatMessage
+	Questions        []Question
+	Answers          []Answer
+	CurrentQ         int
+	InChatMode       bool
+	InterviewSession *understand.InterviewSession
+	Requirements     *understand.Requirements
 
 	// Plan state
 	Plan   *Plan
