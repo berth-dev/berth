@@ -245,7 +245,7 @@ func (a *App) updateInterview(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 		a.model.CurrentQ++
 
-		// Check if more questions
+		// Check if more questions in current round
 		if a.model.CurrentQ < len(a.model.Questions) {
 			a.interviewView = views.NewInterviewModel(
 				a.model.Questions[a.model.CurrentQ],
@@ -254,9 +254,12 @@ func (a *App) updateInterview(msg tea.Msg) (tea.Model, tea.Cmd) {
 			)
 			return a, a.interviewView.Init()
 		}
-		// All questions answered, transition to planning
-		// TODO: Generate plan from answers
-		return a, nil
+		// All questions in this round answered - process and get next round or complete
+		a.model.State = tui.StateAnalyzing
+		return a, tea.Batch(
+			a.model.Spinner.Tick,
+			commands.ProcessAnswersCmd(a.model.InterviewSession, a.model.Answers),
+		)
 
 	case tui.EnterChatMsg:
 		// Transition to chat mode for this question
@@ -270,9 +273,12 @@ func (a *App) updateInterview(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.chatView.Init()
 
 	case tui.SkipInterviewMsg:
-		// Skip remaining questions and go to planning
-		// TODO: Generate plan
-		return a, nil
+		// Skip remaining questions and go directly to planning
+		a.model.State = tui.StateAnalyzing
+		return a, tea.Batch(
+			a.model.Spinner.Tick,
+			commands.ProcessAnswersCmd(a.model.InterviewSession, a.model.Answers),
+		)
 	}
 
 	return a, cmd
