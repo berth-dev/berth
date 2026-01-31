@@ -418,7 +418,7 @@ func (a *App) isInputFocused() bool {
 	}
 }
 
-// cycleTab cycles through available tabs.
+// cycleTab cycles through available tabs (Chat ↔ Dashboard).
 func (a *App) cycleTab() {
 	switch a.model.ActiveTab {
 	case tui.TabChat:
@@ -432,8 +432,6 @@ func (a *App) cycleTab() {
 			a.model.Height,
 		)
 	case tui.TabDashboard:
-		a.model.ActiveTab = tui.TabSessions
-	case tui.TabSessions:
 		a.model.ActiveTab = tui.TabChat
 		a.model.State = tui.StateHome
 	}
@@ -457,7 +455,6 @@ func (a *App) renderTabBar(activeTab tui.Tab) string {
 	}{
 		{"Chat", tui.TabChat},
 		{"Dashboard", tui.TabDashboard},
-		{"Sessions", tui.TabSessions},
 	}
 
 	var rendered []string
