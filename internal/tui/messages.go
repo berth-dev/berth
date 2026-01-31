@@ -231,3 +231,25 @@ type WindowSizeMsg struct {
 	Width  int
 	Height int
 }
+
+// ============================================================================
+// Dashboard Messages
+// ============================================================================
+
+// ArchitectureDiagramMsg provides the architecture diagram data.
+type ArchitectureDiagramMsg struct {
+	Diagram string
+	Err     error
+}
+
+// LearningsLoadMsg provides learnings data.
+type LearningsLoadMsg struct {
+	Learnings []string
+	Err       error
+}
+
+// SessionsLoadMsg provides sessions data.
+type SessionsLoadMsg struct {
+	Sessions []SessionInfo
+	Err      error
+}
