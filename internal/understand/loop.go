@@ -77,7 +77,6 @@ type InterviewSession struct {
 	RunDir           string
 	GraphSummary     string
 	Description      string
-	Context          context.Context
 	currentQuestions []Question // internal, for tracking current round's questions
 }
 
@@ -101,8 +100,10 @@ func StartInterviewSession(
 		RunDir:         runDir,
 		GraphSummary:   graphSummary,
 		Description:    description,
-		Context:        ctx,
 	}
+	// Note: ctx parameter is kept for future use but not stored in session.
+	// Each spawnClaude call creates its own context with timeout.
+	_ = ctx
 
 	// Build the first interview prompt.
 	prompt := BuildUnderstandPrompt(session.CurrentRound, session.PreviousRounds, stackInfo, graphSummary, description)
@@ -160,9 +161,26 @@ func (s *InterviewSession) ContinueInterview(answers []Answer) ([]Question, bool
 	// Increment round count.
 	s.CurrentRound++
 
-	// Check for max rounds safety cap.
+	// Check for max rounds safety cap AFTER storing answers.
+	// This ensures the final round's answers are preserved and can be used
+	// in a final attempt to generate requirements.
 	if s.CurrentRound > maxRounds {
-		return nil, false, nil, fmt.Errorf("interview: reached maximum rounds (%d) without completion", maxRounds)
+		// Try one last Claude call to finalize with all accumulated answers
+		prompt := BuildUnderstandPrompt(s.CurrentRound, s.PreviousRounds, s.StackInfo, s.GraphSummary, s.Description)
+		output, err := spawnClaude(prompt)
+		if err != nil {
+			return nil, false, nil, fmt.Errorf("interview: max rounds reached (%d), final attempt failed: %w", maxRounds, err)
+		}
+		cleaned := cleanJSONOutput(output)
+		var resp UnderstandResponse
+		if err := json.Unmarshal([]byte(cleaned), &resp); err != nil {
+			return nil, false, nil, fmt.Errorf("interview: max rounds reached (%d), failed to parse: %w", maxRounds, err)
+		}
+		reqs, err := finalize(resp, s.RunDir)
+		if err != nil {
+			return nil, false, nil, fmt.Errorf("interview: max rounds reached (%d), failed to finalize: %w", maxRounds, err)
+		}
+		return nil, true, reqs, nil
 	}
 
 	// Build the next prompt with accumulated history.
