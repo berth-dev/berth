@@ -25,8 +25,14 @@ func SpawnClaudeCmd(
 
 		go func() {
 			defer close(outputChan)
-			// Error is communicated via channel events, not return value
-			_, _ = execute.SpawnClaude(cfg, systemPrompt, taskPrompt, projectRoot, opts)
+			_, err := execute.SpawnClaude(cfg, systemPrompt, taskPrompt, projectRoot, opts)
+			if err != nil {
+				outputChan <- execute.StreamEvent{
+					Type:    "error",
+					BeadID:  beadID,
+					Content: err.Error(),
+				}
+			}
 		}()
 
 		return tui.ClaudeStartMsg{BeadID: beadID}
