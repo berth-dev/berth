@@ -69,14 +69,15 @@ func (i SessionItem) FilterValue() string {
 
 // DashboardModel is the view model for the dashboard screen.
 type DashboardModel struct {
-	activeTab   int // 0=Architecture, 1=Learnings, 2=Sessions
-	diagram     string
-	learnings   []string
-	sessions    []tui.SessionInfo
-	sessionList list.Model
-	viewport    viewport.Model
-	width       int
-	height      int
+	activeTab     int // 0=Architecture, 1=Learnings, 2=Sessions
+	diagram       string
+	learnings     []string
+	sessions      []tui.SessionInfo
+	sessionsError string
+	sessionList   list.Model
+	viewport      viewport.Model
+	width         int
+	height        int
 
 	// Dependencies for loading data
 	kgClient    *graph.Client
@@ -250,10 +251,11 @@ func (m DashboardModel) Update(msg tea.Msg) (DashboardModel, tea.Cmd) {
 
 	case tui.SessionsLoadMsg:
 		if msg.Err != nil {
-			// Handle error - show empty sessions with error state
 			m.sessions = nil
+			m.sessionsError = "Failed to load sessions: " + msg.Err.Error()
 		} else {
 			m.sessions = msg.Sessions
+			m.sessionsError = ""
 			// Update session list items
 			items := make([]list.Item, len(m.sessions))
 			for i, s := range m.sessions {
@@ -326,7 +328,9 @@ func (m DashboardModel) View() string {
 
 	case 2:
 		// Sessions list
-		if len(m.sessions) == 0 {
+		if m.sessionsError != "" {
+			b.WriteString(tui.ErrorStyle.Render(m.sessionsError))
+		} else if len(m.sessions) == 0 {
 			b.WriteString(tui.DimStyle.Render("No sessions yet"))
 		} else {
 			b.WriteString(m.sessionList.View())

@@ -38,6 +38,7 @@ type HomeModel struct {
 	showResume    bool
 	width         int
 	height        int
+	Err           error
 }
 
 // NewHomeModel creates a new HomeModel with optional resume session.
@@ -103,6 +104,17 @@ func (m HomeModel) View() string {
 	header := tui.TitleStyle.Render("Berth - Software Factory")
 	b.WriteString(header)
 	b.WriteString("\n\n")
+
+	// Display error if present
+	if m.Err != nil {
+		errorBox := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FF0000")).
+			Background(lipgloss.Color("#3D0000")).
+			Padding(0, 1).
+			Render(fmt.Sprintf("Error: %s", m.Err.Error()))
+		b.WriteString(errorBox)
+		b.WriteString("\n\n")
+	}
 
 	// Resume session hint (if available)
 	if m.showResume && m.resumeSession != nil {
