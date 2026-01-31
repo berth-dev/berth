@@ -73,11 +73,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 
 		case tui.KeyTab:
-			// Cycle through tabs when not in focused input
-			if !a.isInputFocused() {
-				a.cycleTab()
-				return a, nil
-			}
+			// Always cycle through tabs - Tab isn't needed for single-line inputs
+			a.cycleTab()
+			return a, nil
 		}
 	}
 
