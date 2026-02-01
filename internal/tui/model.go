@@ -4,11 +4,11 @@ package tui
 import (
 	"time"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
 
 	"github.com/berth-dev/berth/internal/config"
 	"github.com/berth-dev/berth/internal/detect"
@@ -203,7 +203,7 @@ func NewModel(cfg *config.Config, projectRoot string) *Model {
 	ti := textinput.New()
 	ti.Placeholder = "Type your message..."
 	ti.CharLimit = 2000
-	ti.Width = 80
+	ti.SetWidth(80)
 
 	// Initialize textarea
 	ta := textarea.New()
@@ -214,8 +214,8 @@ func NewModel(cfg *config.Config, projectRoot string) *Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
-	// Initialize viewport
-	vp := viewport.New(80, 24)
+	// Initialize viewport with functional options (v2 API)
+	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(24))
 
 	// Initialize list with empty items
 	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 80, 24)

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/berth-dev/berth/internal/graph"
 	"github.com/berth-dev/berth/internal/session"
@@ -112,7 +112,7 @@ func NewDashboardModel(diagram string, learnings []string, sessions []tui.Sessio
 	}
 	contentHeight := maxContentHeight
 
-	vp := viewport.New(contentWidth, contentHeight)
+	vp := viewport.New(viewport.WithWidth(contentWidth), viewport.WithHeight(contentHeight))
 	vp.SetContent(diagram)
 
 	// Initialize session list
@@ -174,7 +174,7 @@ func (m DashboardModel) Update(msg tea.Msg) (DashboardModel, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "right":
 			// Cycle to next internal tab

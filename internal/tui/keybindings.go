@@ -1,20 +1,20 @@
 // Package tui implements the terminal user interface using Bubble Tea.
 package tui
 
-import "github.com/charmbracelet/bubbles/key"
+import "charm.land/bubbles/v2/key"
 
 // KeyMap defines all key bindings for the TUI.
 type KeyMap struct {
 	// Navigation
-	Up    key.Binding
-	Down  key.Binding
-	Enter key.Binding
+	Up     key.Binding
+	Down   key.Binding
+	Enter  key.Binding
 	Escape key.Binding
-	Tab   key.Binding
+	Tab    key.Binding
 
 	// Control
-	CtrlC     key.Binding
-	CtrlEnter key.Binding
+	CtrlC   key.Binding
+	NewLine key.Binding
 
 	// Actions
 	Pause   key.Binding
@@ -52,9 +52,9 @@ var DefaultKeyMap = KeyMap{
 		key.WithKeys("ctrl+c"),
 		key.WithHelp("ctrl+c", "exit"),
 	),
-	CtrlEnter: key.NewBinding(
-		key.WithKeys("ctrl+enter"),
-		key.WithHelp("ctrl+enter", "skip to planning"),
+	NewLine: key.NewBinding(
+		key.WithKeys("shift+enter", "ctrl+j"),
+		key.WithHelp("shift+enter", "new line"),
 	),
 	Pause: key.NewBinding(
 		key.WithKeys("p"),

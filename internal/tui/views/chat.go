@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/berth-dev/berth/internal/tui"
 )
@@ -51,11 +52,19 @@ type ChatModel struct {
 func NewChatModel(contextLabel string, initialMessages []tui.ChatMessage, width, height int) ChatModel {
 	// Initialize textarea
 	ta := textarea.New()
-	ta.Placeholder = "Type your message... (Ctrl+Enter to send)"
+	ta.Placeholder = "Type your message... (Enter to send)"
 	ta.CharLimit = 5000
 	ta.SetWidth(width - 8) // Account for box padding
 	ta.SetHeight(3)
 	ta.ShowLineNumbers = false
+
+	// Configure key bindings: Shift+Enter for newline, Enter for submit
+	keyMap := ta.KeyMap
+	keyMap.InsertNewline = key.NewBinding(
+		key.WithKeys("shift+enter", "ctrl+j"),
+		key.WithHelp("shift+enter", "new line"),
+	)
+	ta.KeyMap = keyMap
 
 	// Initialize spinner
 	sp := spinner.New()
@@ -73,8 +82,8 @@ func NewChatModel(contextLabel string, initialMessages []tui.ChatMessage, width,
 		vpWidth = 20
 	}
 
-	// Initialize viewport
-	vp := viewport.New(vpWidth, vpHeight)
+	// Initialize viewport with functional options (v2 API)
+	vp := viewport.New(viewport.WithWidth(vpWidth), viewport.WithHeight(vpHeight))
 	vp.SetContent(formatMessages(initialMessages))
 
 	return ChatModel{
@@ -100,9 +109,11 @@ func (m ChatModel) Update(msg tea.Msg) (ChatModel, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case tui.KeyCtrlEnter, "ctrl+s":
+	case tea.KeyPressMsg:
+		keyStr := msg.String()
+
+		// Enter submits
+		if keyStr == tui.KeyEnter {
 			// Send message if textarea has content
 			content := strings.TrimSpace(m.textarea.Value())
 			if content != "" {
@@ -125,8 +136,15 @@ func (m ChatModel) Update(msg tea.Msg) (ChatModel, tea.Cmd) {
 				}
 			}
 			return m, nil
+		}
 
-		case tui.KeyEsc:
+		// Shift+Enter or Ctrl+J inserts newline
+		if keyStr == tui.KeyShiftEnter || keyStr == tui.KeyCtrlJ {
+			m.textarea.InsertString("\n")
+			return m, nil
+		}
+
+		if keyStr == tui.KeyEsc {
 			return m, func() tea.Msg {
 				return ExitChatMsg{}
 			}
@@ -165,8 +183,8 @@ func (m ChatModel) Update(msg tea.Msg) (ChatModel, tea.Cmd) {
 			vpWidth = 20
 		}
 
-		m.viewport.Width = vpWidth
-		m.viewport.Height = vpHeight
+		m.viewport.SetWidth(vpWidth)
+		m.viewport.SetHeight(vpHeight)
 		m.textarea.SetWidth(vpWidth)
 
 		// Re-format messages with new width
@@ -214,7 +232,7 @@ func (m ChatModel) View() string {
 	b.WriteString("\n\n")
 
 	// Footer
-	footer := tui.DimStyle.Render("Ctrl+Enter: Send   Esc: Back")
+	footer := tui.DimStyle.Render("Enter: Submit · Shift+Enter: New line · Esc: Back")
 	b.WriteString(footer)
 
 	// Wrap in box style

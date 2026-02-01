@@ -5,21 +5,22 @@ import (
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
 )
 
 // Common key binding constants.
 const (
-	KeyCtrlC     = "ctrl+c"
-	KeyCtrlEnter = "ctrl+enter"
-	KeyTab       = "tab"
-	KeyEnter     = "enter"
-	KeyEsc       = "esc"
-	KeyUp        = "up"
-	KeyDown      = "down"
-	KeyLeft      = "left"
-	KeyRight     = "right"
+	KeyCtrlC      = "ctrl+c"
+	KeyEnter      = "enter"        // Submit
+	KeyShiftEnter = "shift+enter"  // New line
+	KeyCtrlJ      = "ctrl+j"       // Fallback new line
+	KeyTab        = "tab"
+	KeyEsc        = "esc"
+	KeyUp         = "up"
+	KeyDown       = "down"
+	KeyLeft       = "left"
+	KeyRight      = "right"
 )
 
 // IsTTY returns true if stdout is connected to a terminal.
@@ -30,9 +31,13 @@ func IsTTY() bool {
 // Run starts the TUI program with the given model.
 // If stdout is a TTY, it runs in alternate screen mode.
 // Otherwise, it delegates to runFallback for non-interactive behavior.
+// Note: In Bubble Tea v2, alt screen and keyboard enhancements are set on the View,
+// not as program options. By default, Bubble Tea v2 requests basic keyboard
+// disambiguation, enabling shift+enter detection. Views that need additional
+// features like key releases can request them via View.KeyboardEnhancements.
 func Run(m tea.Model) error {
 	if IsTTY() {
-		p := tea.NewProgram(m, tea.WithAltScreen())
+		p := tea.NewProgram(m)
 		_, err := p.Run()
 		return err
 	}

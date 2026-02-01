@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/berth-dev/berth/internal/detect"
 	"github.com/berth-dev/berth/internal/tui"
@@ -46,7 +46,7 @@ func (m InitModel) Init() tea.Cmd {
 // Update handles messages for the init view.
 func (m InitModel) Update(msg tea.Msg) (InitModel, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "left", "h":
 			if m.selected > 0 {

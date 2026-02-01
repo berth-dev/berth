@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/berth-dev/berth/internal/tui"
 )
@@ -33,7 +33,7 @@ func NewPlanModel(plan *tui.Plan, groups []tui.ExecutionGroup, width, height int
 	ti := textinput.New()
 	ti.Placeholder = "Enter feedback..."
 	ti.CharLimit = 1000
-	ti.Width = width - 10
+	ti.SetWidth(width - 10)
 
 	return PlanModel{
 		plan:              plan,
@@ -59,7 +59,7 @@ func (m PlanModel) Update(msg tea.Msg) (PlanModel, tea.Cmd) {
 	// Handle feedback input mode
 	if m.showFeedbackInput {
 		switch msg := msg.(type) {
-		case tea.KeyMsg:
+		case tea.KeyPressMsg:
 			switch msg.String() {
 			case tui.KeyEsc:
 				m.showFeedbackInput = false
@@ -81,7 +81,7 @@ func (m PlanModel) Update(msg tea.Msg) (PlanModel, tea.Cmd) {
 
 	// Handle normal navigation mode
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "a":
 			return m, func() tea.Msg {
@@ -114,7 +114,7 @@ func (m PlanModel) Update(msg tea.Msg) (PlanModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.feedbackInput.Width = msg.Width - 10
+		m.feedbackInput.SetWidth(msg.Width - 10)
 		return m, nil
 	}
 

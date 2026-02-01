@@ -4,7 +4,7 @@ package commands
 import (
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/berth-dev/berth/internal/context"
 	"github.com/berth-dev/berth/internal/graph"

@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/berth-dev/berth/internal/session"
 	"github.com/berth-dev/berth/internal/tui"
@@ -54,11 +55,21 @@ func NewHomeModel(resumeSession *session.Session, width, height int) HomeModel {
 	ta.SetHeight(1)              // Start with 1 line, will grow as needed
 	ta.Focus()
 
-	// Style the textarea
-	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
-	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
-	ta.FocusedStyle.Text = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))
-	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#7C3AED"))
+	// Configure key bindings: Shift+Enter for newline, Enter for submit
+	keyMap := ta.KeyMap
+	keyMap.InsertNewline = key.NewBinding(
+		key.WithKeys("shift+enter", "ctrl+j"),
+		key.WithHelp("shift+enter", "new line"),
+	)
+	ta.KeyMap = keyMap
+
+	// Style the textarea (v2 API uses SetStyles and Styles())
+	styles := ta.Styles()
+	styles.Focused.CursorLine = lipgloss.NewStyle()
+	styles.Focused.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+	styles.Focused.Text = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB"))
+	styles.Focused.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("#7C3AED"))
+	ta.SetStyles(styles)
 	ta.Prompt = "> "
 	ta.ShowLineNumbers = false
 
@@ -81,11 +92,11 @@ func (m HomeModel) Update(msg tea.Msg) (HomeModel, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		keyStr := msg.String()
 
-		// Cmd+Enter or Ctrl+Enter submits
-		if keyStr == "ctrl+enter" || keyStr == "cmd+enter" {
+		// Enter submits
+		if keyStr == tui.KeyEnter {
 			value := strings.TrimSpace(m.textArea.Value())
 			if value != "" {
 				return m, func() tea.Msg {
@@ -95,8 +106,12 @@ func (m HomeModel) Update(msg tea.Msg) (HomeModel, tea.Cmd) {
 			return m, nil
 		}
 
-		// Regular Enter is handled by textarea (adds newline)
-		// Don't intercept it
+		// Shift+Enter or Ctrl+J inserts newline
+		if keyStr == tui.KeyShiftEnter || keyStr == tui.KeyCtrlJ {
+			m.textArea.InsertString("\n")
+			m.adjustTextAreaHeight()
+			return m, nil
+		}
 
 		// Handle 'r' to resume (only if textarea is empty)
 		if keyStr == "r" || keyStr == "R" {
@@ -211,7 +226,7 @@ func (m HomeModel) View() string {
 	} else {
 		ctrlCHint = tui.DimStyle.Render(ctrlCHint)
 	}
-	footer := tui.DimStyle.Render("Cmd+Enter: Submit · Enter: New line · Tab: Switch tabs · ") + ctrlCHint
+	footer := tui.DimStyle.Render("Enter: Submit · Shift+Enter: New line · Tab: Switch tabs · ") + ctrlCHint
 	b.WriteString(footer)
 
 	// Determine box width - use max width or screen width, whichever is smaller

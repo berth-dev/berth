@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/berth-dev/berth/internal/tui"
 )
@@ -46,7 +46,7 @@ func NewExecutionModel(beads []tui.BeadState, isParallel bool, width, height int
 	if viewportHeight < 5 {
 		viewportHeight = 5
 	}
-	vp := viewport.New(width-6, viewportHeight)
+	vp := viewport.New(viewport.WithWidth(width-6), viewport.WithHeight(viewportHeight))
 	vp.SetContent("")
 
 	return ExecutionModel{
@@ -91,7 +91,7 @@ func (m ExecutionModel) Update(msg tea.Msg) (ExecutionModel, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "p":
 			m.isPaused = !m.isPaused
@@ -128,8 +128,8 @@ func (m ExecutionModel) Update(msg tea.Msg) (ExecutionModel, tea.Cmd) {
 		if viewportHeight < 5 {
 			viewportHeight = 5
 		}
-		m.viewport.Width = m.width - 6
-		m.viewport.Height = viewportHeight
+		m.viewport.SetWidth(m.width - 6)
+		m.viewport.SetHeight(viewportHeight)
 		return m, nil
 	}
 

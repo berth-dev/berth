@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/berth-dev/berth/internal/tui"
 )
@@ -80,7 +80,7 @@ func NewInterviewModel(q tui.Question, width, height int) InterviewModel {
 	ti := textinput.New()
 	ti.Placeholder = "Type your answer here..."
 	ti.CharLimit = 500
-	ti.Width = maxInterviewWidth - 12
+	ti.SetWidth(maxInterviewWidth - 12)
 
 	return InterviewModel{
 		question:    q,
@@ -116,7 +116,7 @@ func (m InterviewModel) Update(msg tea.Msg) (InterviewModel, tea.Cmd) {
 	// Handle typing mode (when on custom option)
 	if isOnCustomOption {
 		switch msg := msg.(type) {
-		case tea.KeyMsg:
+		case tea.KeyPressMsg:
 			switch msg.String() {
 			case tui.KeyEnter:
 				// Submit custom value
@@ -169,7 +169,7 @@ func (m InterviewModel) Update(msg tea.Msg) (InterviewModel, tea.Cmd) {
 
 	// Handle normal navigation mode
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case tui.KeyUp, "k":
 			if m.selected > 0 {

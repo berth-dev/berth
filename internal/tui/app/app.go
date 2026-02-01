@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/berth-dev/berth/internal/config"
 	"github.com/berth-dev/berth/internal/execute"
@@ -78,7 +78,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, cmd
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case tui.KeyCtrlC:
 			if a.model.CtrlCPending {
@@ -139,7 +139,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tui.StateComplete:
 		// Handle any key to exit
-		if _, ok := msg.(tea.KeyMsg); ok {
+		if _, ok := msg.(tea.KeyPressMsg); ok {
 			return a, tea.Quit
 		}
 	}
@@ -148,7 +148,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the current application state.
-func (a *App) View() string {
+// In Bubble Tea v2, View() returns tea.View instead of string.
+// Alt screen mode is enabled via the AltScreen field on the view.
+func (a *App) View() tea.View {
 	var content string
 	var needsCentering bool
 
@@ -207,7 +209,10 @@ func (a *App) View() string {
 		content = a.centerContent(content)
 	}
 
-	return content
+	// Create tea.View with alt screen enabled for fullscreen mode
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
 }
 
 // centerContent centers the given content both horizontally and vertically.
@@ -768,16 +773,6 @@ func (a *App) transitionToComplete() {
 // ============================================================================
 // Helper Methods
 // ============================================================================
-
-// isInputFocused returns true if the current view has a focused text input.
-func (a *App) isInputFocused() bool {
-	switch a.model.State {
-	case tui.StateHome, tui.StateChat:
-		return true
-	default:
-		return false
-	}
-}
 
 // updateBeadStatus updates the status of a bead by ID.
 func (a *App) updateBeadStatus(beadID string, status string) {

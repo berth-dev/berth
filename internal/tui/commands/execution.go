@@ -4,7 +4,7 @@ package commands
 import (
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/berth-dev/berth/internal/config"
 	"github.com/berth-dev/berth/internal/execute"
