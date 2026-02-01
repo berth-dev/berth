@@ -264,7 +264,12 @@ func cleanJSONOutput(s string) string {
 	}
 
 	// No code fence found. Try to find JSON object boundaries.
-	start := strings.Index(s, "{")
+	// Look for '{"' to avoid matching braces in prose like "{see below}".
+	start := strings.Index(s, `{"`)
+	if start == -1 {
+		// Fallback to any '{' if no '{"' found (e.g., empty object or array).
+		start = strings.Index(s, "{")
+	}
 	end := strings.LastIndex(s, "}")
 	if start != -1 && end != -1 && end > start {
 		return s[start : end+1]
