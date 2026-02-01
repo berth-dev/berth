@@ -734,8 +734,13 @@ func cleanJSONOutput(s string) string {
 		return string(raw)
 	}
 
-	// Fallback: use simple brace matching (less reliable but handles some
-	// edge cases where JSON is malformed but still parseable).
+	// No code fence found. Try to find JSON object boundaries.
+	// Look for '{"' to avoid matching braces in prose like "{see below}".
+	start := strings.Index(s, `{"`)
+	if start == -1 {
+		// Fallback to any '{' if no '{"' found (e.g., empty object or array).
+		start = strings.Index(s, "{")
+	}
 	end := strings.LastIndex(s, "}")
 	if end > start {
 		return s[start : end+1]
