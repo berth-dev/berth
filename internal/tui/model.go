@@ -21,7 +21,8 @@ import (
 type ViewState int
 
 const (
-	StateInit ViewState = iota // Project needs initialization
+	StateTerminalSetup ViewState = iota // Terminal setup prompt (first run)
+	StateInit                           // Project needs initialization
 	StateHome
 	StateAnalyzing
 	StateInterview

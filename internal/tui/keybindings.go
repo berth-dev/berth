@@ -53,7 +53,7 @@ var DefaultKeyMap = KeyMap{
 		key.WithHelp("ctrl+c", "exit"),
 	),
 	NewLine: key.NewBinding(
-		key.WithKeys("shift+enter", "ctrl+j"),
+		key.WithKeys("shift+enter"),
 		key.WithHelp("shift+enter", "new line"),
 	),
 	Pause: key.NewBinding(

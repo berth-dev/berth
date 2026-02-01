@@ -17,6 +17,7 @@ import (
 	"github.com/berth-dev/berth/internal/session"
 	"github.com/berth-dev/berth/internal/tui"
 	"github.com/berth-dev/berth/internal/tui/commands"
+	"github.com/berth-dev/berth/internal/tui/terminal"
 	"github.com/berth-dev/berth/internal/tui/views"
 )
 
@@ -27,13 +28,20 @@ type App struct {
 	model *tui.Model
 
 	// View models
-	initView      views.InitModel
-	homeView      views.HomeModel
-	interviewView views.InterviewModel
-	chatView      views.ChatModel
-	planView      views.PlanModel
-	executionView views.ExecutionModel
-	dashboardView views.DashboardModel
+	terminalSetupView views.TerminalSetupModel
+	initView          views.InitModel
+	homeView          views.HomeModel
+	interviewView     views.InterviewModel
+	chatView          views.ChatModel
+	planView          views.PlanModel
+	executionView     views.ExecutionModel
+	dashboardView     views.DashboardModel
+
+	// Track pending init check result for after terminal setup
+	pendingInitCheck *tui.InitCheckMsg
+
+	// Keyboard enhancement support (detected once at startup)
+	hasKeyboardEnhancements bool
 }
 
 // New creates a new App with the given configuration.
@@ -63,6 +71,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Only propagate to the currently active view to avoid nil pointer on uninitialized views
 		var cmd tea.Cmd
 		switch a.model.State {
+		case tui.StateTerminalSetup:
+			a.terminalSetupView, cmd = a.terminalSetupView.Update(msg)
 		case tui.StateHome:
 			a.homeView, cmd = a.homeView.Update(msg)
 		case tui.StateInterview:
@@ -104,6 +114,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reset Ctrl+C confirmation state after timeout
 		a.model.CtrlCPending = false
 		return a, nil
+
+	case tea.KeyboardEnhancementsMsg:
+		// Store keyboard enhancement support at app level
+		// This allows us to propagate to views created later
+		a.hasKeyboardEnhancements = true
+		// Propagate to all existing views
+		a.homeView.SetHasKeyboardEnhancements(true)
+		a.chatView.SetHasKeyboardEnhancements(true)
+		return a, nil
 	}
 
 	// Handle init check message (can arrive before state is set)
@@ -113,6 +132,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Route messages based on current state
 	switch a.model.State {
+	case tui.StateTerminalSetup:
+		return a.updateTerminalSetup(msg)
+
 	case tui.StateInit:
 		return a.updateInit(msg)
 
@@ -160,6 +182,10 @@ func (a *App) View() tea.View {
 	a.dashboardView.SetCtrlCPending(a.model.CtrlCPending)
 
 	switch a.model.State {
+	case tui.StateTerminalSetup:
+		content = a.terminalSetupView.View()
+		needsCentering = true
+
 	case tui.StateInit:
 		content = a.initView.View()
 		needsCentering = true
@@ -234,6 +260,38 @@ func (a *App) centerContent(content string) string {
 
 // handleInitCheck processes the init check result and transitions to appropriate state.
 func (a *App) handleInitCheck(msg tui.InitCheckMsg) (tea.Model, tea.Cmd) {
+	// Check if terminal setup is needed before continuing
+	if a.needsTerminalSetup() {
+		// Store the init check result for after terminal setup
+		a.pendingInitCheck = &msg
+		a.model.State = tui.StateTerminalSetup
+		terminalType := tui.DetectTerminal()
+		a.terminalSetupView = views.NewTerminalSetupModel(terminalType, a.model.Width, a.model.Height)
+		return a, a.terminalSetupView.Init()
+	}
+
+	return a.proceedFromInitCheck(msg)
+}
+
+// needsTerminalSetup checks if terminal setup prompt should be shown.
+func (a *App) needsTerminalSetup() bool {
+	// Check if terminal needs setup
+	if !tui.NeedsTerminalSetup() {
+		return false // Terminal has native support
+	}
+
+	// Check if we've already shown the prompt
+	cfg, err := terminal.LoadConfig()
+	if err != nil {
+		return true // Error loading config, show prompt
+	}
+
+	// Don't show if already completed or declined
+	return !cfg.SetupCompleted && !cfg.SetupDeclined
+}
+
+// proceedFromInitCheck continues the init flow after terminal setup (if any).
+func (a *App) proceedFromInitCheck(msg tui.InitCheckMsg) (tea.Model, tea.Cmd) {
 	if msg.NeedsInit {
 		// Project needs initialization - show init prompt
 		a.model.State = tui.StateInit
@@ -248,6 +306,27 @@ func (a *App) handleInitCheck(msg tui.InitCheckMsg) (tea.Model, tea.Cmd) {
 	// Project already initialized - go to home
 	a.model.State = tui.StateHome
 	return a, a.homeView.Init()
+}
+
+// updateTerminalSetup handles messages for the terminal setup prompt state.
+func (a *App) updateTerminalSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	a.terminalSetupView, cmd = a.terminalSetupView.Update(msg)
+
+	switch msg.(type) {
+	case views.TerminalSetupCompleteMsg:
+		// Terminal setup complete or skipped - continue to init check
+		if a.pendingInitCheck != nil {
+			initMsg := *a.pendingInitCheck
+			a.pendingInitCheck = nil
+			return a.proceedFromInitCheck(initMsg)
+		}
+		// Fallback: go to home
+		a.model.State = tui.StateHome
+		return a, a.homeView.Init()
+	}
+
+	return a, cmd
 }
 
 // updateInit handles messages for the initialization prompt state.
@@ -489,6 +568,7 @@ func (a *App) updateInterview(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.model.Width,
 			a.model.Height,
 		)
+		a.chatView.SetHasKeyboardEnhancements(a.hasKeyboardEnhancements)
 		return a, a.chatView.Init()
 
 	case tui.SkipInterviewMsg:

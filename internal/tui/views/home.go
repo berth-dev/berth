@@ -4,6 +4,7 @@ package views
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
@@ -28,19 +29,24 @@ type ResumeSessionMsg struct {
 	SessionID string
 }
 
+// HomeEscResetMsg resets the ESC pending state after timeout.
+type HomeEscResetMsg struct{}
+
 // ============================================================================
 // HomeModel
 // ============================================================================
 
 // HomeModel is the view model for the home screen.
 type HomeModel struct {
-	textArea      textarea.Model
-	resumeSession *session.Session
-	showResume    bool
-	width         int
-	height        int
-	Err           error
-	ctrlCPending  bool
+	textArea                textarea.Model
+	resumeSession           *session.Session
+	showResume              bool
+	width                   int
+	height                  int
+	Err                     error
+	ctrlCPending            bool
+	escPending              bool // For ESC+CR sequence detection (terminals without native Shift+Enter)
+	hasKeyboardEnhancements bool // True if terminal supports Shift+Enter natively
 }
 
 // maxBoxWidth is the maximum width for the home view box.
@@ -55,10 +61,11 @@ func NewHomeModel(resumeSession *session.Session, width, height int) HomeModel {
 	ta.SetHeight(1)              // Start with 1 line, will grow as needed
 	ta.Focus()
 
-	// Configure key bindings: Shift+Enter for newline, Enter for submit
+	// Configure key bindings: Shift+Enter for newline (native Kitty protocol)
+	// ESC+CR sequence is handled separately in Update() for configured terminals
 	keyMap := ta.KeyMap
 	keyMap.InsertNewline = key.NewBinding(
-		key.WithKeys("shift+enter", "ctrl+j"),
+		key.WithKeys("shift+enter"),
 		key.WithHelp("shift+enter", "new line"),
 	)
 	ta.KeyMap = keyMap
@@ -92,12 +99,59 @@ func (m HomeModel) Update(msg tea.Msg) (HomeModel, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.KeyboardEnhancementsMsg:
+		// Terminal reported its keyboard enhancement capabilities
+		// If we receive this message, the terminal supports the Kitty keyboard protocol
+		// which means Shift+Enter detection works
+		m.hasKeyboardEnhancements = true
+		return m, nil
+
+	case HomeEscResetMsg:
+		// Timeout expired - reset ESC pending state
+		m.escPending = false
+		return m, nil
+
 	case tea.KeyPressMsg:
 		keyStr := msg.String()
 
-		// Enter submits
+		// ESC+CR sequence detection (for terminals configured via /terminal-setup)
+		// If ESC was pressed and now Enter is pressed within timeout, insert newline
+		if m.escPending && keyStr == tui.KeyEnter {
+			m.escPending = false
+			m.textArea.InsertString("\n")
+			m.adjustTextAreaHeight()
+			return m, nil
+		}
+
+		// Track ESC key for ESC+CR sequence
+		if keyStr == tui.KeyEsc {
+			m.escPending = true
+			// Reset after 200ms if no CR follows
+			return m, tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
+				return HomeEscResetMsg{}
+			})
+		}
+
+		// Reset ESC pending on any other key
+		m.escPending = false
+
+		// Enter submits (only if not part of ESC+CR sequence)
 		if keyStr == tui.KeyEnter {
-			value := strings.TrimSpace(m.textArea.Value())
+			text := m.textArea.Value()
+
+			// Backslash+Enter = newline (fallback for terminals without keyboard enhancements)
+			// This works like Claude Code: type \ then Enter to insert a newline
+			if strings.HasSuffix(text, "\\") {
+				// Remove trailing backslash and add newline
+				newText := text[:len(text)-1] + "\n"
+				m.textArea.SetValue(newText)
+				m.textArea.CursorEnd()
+				m.adjustTextAreaHeight()
+				return m, nil
+			}
+
+			// Normal submit
+			value := strings.TrimSpace(text)
 			if value != "" {
 				return m, func() tea.Msg {
 					return SubmitTaskMsg{Description: value}
@@ -106,8 +160,8 @@ func (m HomeModel) Update(msg tea.Msg) (HomeModel, tea.Cmd) {
 			return m, nil
 		}
 
-		// Shift+Enter or Ctrl+J inserts newline
-		if keyStr == tui.KeyShiftEnter || keyStr == tui.KeyCtrlJ {
+		// Shift+Enter inserts newline (native Kitty protocol support)
+		if keyStr == tui.KeyShiftEnter {
 			m.textArea.InsertString("\n")
 			m.adjustTextAreaHeight()
 			return m, nil
@@ -219,14 +273,18 @@ func (m HomeModel) View() string {
 	b.WriteString(m.textArea.View())
 	b.WriteString("\n\n")
 
-	// Footer with hints
+	// Footer with hints - show appropriate newline hint based on terminal capability
 	ctrlCHint := "Ctrl+C: Exit"
 	if m.ctrlCPending {
 		ctrlCHint = tui.WarningStyle.Render("Press Ctrl+C again to exit")
 	} else {
 		ctrlCHint = tui.DimStyle.Render(ctrlCHint)
 	}
-	footer := tui.DimStyle.Render("Enter: Submit · Shift+Enter: New line · Tab: Switch tabs · ") + ctrlCHint
+	newlineHint := "\\+Enter: New line"
+	if m.hasKeyboardEnhancements {
+		newlineHint = "Shift+Enter: New line"
+	}
+	footer := tui.DimStyle.Render("Enter: Submit · "+newlineHint+" · Tab: Switch tabs · ") + ctrlCHint
 	b.WriteString(footer)
 
 	// Determine box width - use max width or screen width, whichever is smaller
@@ -256,4 +314,9 @@ func (m HomeModel) GetBoxWidth() int {
 // SetCtrlCPending sets the Ctrl+C pending state for display.
 func (m *HomeModel) SetCtrlCPending(pending bool) {
 	m.ctrlCPending = pending
+}
+
+// SetHasKeyboardEnhancements sets whether the terminal supports keyboard enhancements.
+func (m *HomeModel) SetHasKeyboardEnhancements(has bool) {
+	m.hasKeyboardEnhancements = has
 }

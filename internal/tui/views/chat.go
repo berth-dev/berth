@@ -4,6 +4,7 @@ package views
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
@@ -32,20 +33,25 @@ type ChatResponseMsg struct {
 // ExitChatMsg signals that the user wants to exit the chat view.
 type ExitChatMsg struct{}
 
+// ChatEscResetMsg resets the ESC pending state after timeout.
+type ChatEscResetMsg struct{}
+
 // ============================================================================
 // ChatModel
 // ============================================================================
 
 // ChatModel is the view model for the free-form chat screen.
 type ChatModel struct {
-	messages     []tui.ChatMessage
-	textarea     textarea.Model
-	viewport     viewport.Model
-	contextLabel string
-	isLoading    bool
-	spinner      spinner.Model
-	width        int
-	height       int
+	messages                []tui.ChatMessage
+	textarea                textarea.Model
+	viewport                viewport.Model
+	contextLabel            string
+	isLoading               bool
+	spinner                 spinner.Model
+	width                   int
+	height                  int
+	escPending              bool // For ESC+CR sequence detection (terminals without native Shift+Enter)
+	hasKeyboardEnhancements bool // True if terminal supports Shift+Enter natively
 }
 
 // NewChatModel creates a new ChatModel with the given context and initial messages.
@@ -58,10 +64,11 @@ func NewChatModel(contextLabel string, initialMessages []tui.ChatMessage, width,
 	ta.SetHeight(3)
 	ta.ShowLineNumbers = false
 
-	// Configure key bindings: Shift+Enter for newline, Enter for submit
+	// Configure key bindings: Shift+Enter for newline (native Kitty protocol)
+	// ESC+CR sequence is handled separately in Update() for configured terminals
 	keyMap := ta.KeyMap
 	keyMap.InsertNewline = key.NewBinding(
-		key.WithKeys("shift+enter", "ctrl+j"),
+		key.WithKeys("shift+enter"),
 		key.WithHelp("shift+enter", "new line"),
 	)
 	ta.KeyMap = keyMap
@@ -109,13 +116,63 @@ func (m ChatModel) Update(msg tea.Msg) (ChatModel, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.KeyboardEnhancementsMsg:
+		// Terminal reported its keyboard enhancement capabilities
+		// If we receive this message, the terminal supports the Kitty keyboard protocol
+		// which means Shift+Enter detection works
+		m.hasKeyboardEnhancements = true
+		return m, nil
+
+	case ChatEscResetMsg:
+		// Timeout expired - ESC was standalone, so exit chat
+		if m.escPending {
+			m.escPending = false
+			return m, func() tea.Msg {
+				return ExitChatMsg{}
+			}
+		}
+		return m, nil
+
 	case tea.KeyPressMsg:
 		keyStr := msg.String()
 
-		// Enter submits
+		// ESC+CR sequence detection (for terminals configured via /terminal-setup)
+		// If ESC was pressed and now Enter is pressed within timeout, insert newline
+		if m.escPending && keyStr == tui.KeyEnter {
+			m.escPending = false
+			m.textarea.InsertString("\n")
+			return m, nil
+		}
+
+		// Track ESC key for ESC+CR sequence
+		// ESC alone (after timeout) will exit chat
+		if keyStr == tui.KeyEsc {
+			m.escPending = true
+			// Reset after 200ms - if no CR follows, treat as exit
+			return m, tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
+				return ChatEscResetMsg{}
+			})
+		}
+
+		// Reset ESC pending on any other key
+		m.escPending = false
+
+		// Enter submits (only if not part of ESC+CR sequence)
 		if keyStr == tui.KeyEnter {
+			text := m.textarea.Value()
+
+			// Backslash+Enter = newline (fallback for terminals without keyboard enhancements)
+			// This works like Claude Code: type \ then Enter to insert a newline
+			if strings.HasSuffix(text, "\\") {
+				// Remove trailing backslash and add newline
+				newText := text[:len(text)-1] + "\n"
+				m.textarea.SetValue(newText)
+				m.textarea.CursorEnd()
+				return m, nil
+			}
+
 			// Send message if textarea has content
-			content := strings.TrimSpace(m.textarea.Value())
+			content := strings.TrimSpace(text)
 			if content != "" {
 				// Add user message to history
 				m.messages = append(m.messages, tui.ChatMessage{
@@ -138,16 +195,10 @@ func (m ChatModel) Update(msg tea.Msg) (ChatModel, tea.Cmd) {
 			return m, nil
 		}
 
-		// Shift+Enter or Ctrl+J inserts newline
-		if keyStr == tui.KeyShiftEnter || keyStr == tui.KeyCtrlJ {
+		// Shift+Enter inserts newline (native Kitty protocol support)
+		if keyStr == tui.KeyShiftEnter {
 			m.textarea.InsertString("\n")
 			return m, nil
-		}
-
-		if keyStr == tui.KeyEsc {
-			return m, func() tea.Msg {
-				return ExitChatMsg{}
-			}
 		}
 
 	case ChatResponseMsg:
@@ -231,8 +282,12 @@ func (m ChatModel) View() string {
 
 	b.WriteString("\n\n")
 
-	// Footer
-	footer := tui.DimStyle.Render("Enter: Submit · Shift+Enter: New line · Esc: Back")
+	// Footer - show appropriate newline hint based on terminal capability
+	newlineHint := "\\+Enter: New line"
+	if m.hasKeyboardEnhancements {
+		newlineHint = "Shift+Enter: New line"
+	}
+	footer := tui.DimStyle.Render("Enter: Submit · " + newlineHint + " · Esc: Back")
 	b.WriteString(footer)
 
 	// Wrap in box style
@@ -301,4 +356,9 @@ func formatMessages(messages []tui.ChatMessage) string {
 	}
 
 	return b.String()
+}
+
+// SetHasKeyboardEnhancements sets whether the terminal supports keyboard enhancements.
+func (m *ChatModel) SetHasKeyboardEnhancements(has bool) {
+	m.hasKeyboardEnhancements = has
 }
