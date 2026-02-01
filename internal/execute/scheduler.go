@@ -272,10 +272,13 @@ func (s *Scheduler) executeWorker(node *BeadNode) {
 	}
 
 	// Run retry loop.
-	passed, retryErr := RetryBead(s.cfg, bead, graphData, s.projectRoot, s.logger, s.kgClient, opts)
+	beadResult, retryErr := RetryBead(s.cfg, bead, graphData, s.projectRoot, s.logger, s.kgClient, opts)
 	if retryErr != nil {
 		fmt.Fprintf(os.Stderr, "Error during parallel bead %s execution: %v\n", beadID, retryErr)
 	}
+
+	// Extract success status from result.
+	passed := beadResult != nil && beadResult.Passed
 
 	// Log worker completion.
 	if s.logger != nil {

@@ -15,6 +15,12 @@ import (
 // maxBlindRetries is the number of retries before escalating to diagnostic.
 const maxBlindRetries = 3
 
+// BeadResult contains the outcome of a bead execution attempt.
+type BeadResult struct {
+	Passed       bool   // Whether verification passed
+	ClaudeOutput string // Claude's output text (for close reason)
+}
+
 // RetryBead implements the "3+1" retry strategy for a single bead:
 //
 //  1. Attempts 1-3 (blind retries): build prompt, spawn Claude, verify.
@@ -25,6 +31,8 @@ const maxBlindRetries = 3
 //     accumulated errors, then retry with the diagnosis included in the
 //     prompt. If verification passes, return true. Otherwise return false,
 //     signaling the bead is stuck and the caller should handle escalation.
+//
+// Returns BeadResult with the outcome and Claude's output text for close reasons.
 func RetryBead(
 	cfg config.Config,
 	bead *beads.Bead,
@@ -33,7 +41,7 @@ func RetryBead(
 	logger *log.Logger,
 	kgClient *graph.Client,
 	opts *SpawnClaudeOpts,
-) (bool, error) {
+) (*BeadResult, error) {
 	learnings := berthcontext.ReadLearnings(projectRoot)
 	systemPrompt := prompts.ExecutorSystemPrompt
 	if opts != nil && opts.SystemPrompt != "" {
@@ -72,7 +80,7 @@ func RetryBead(
 
 		if result.Passed {
 			logVerifyPassed(logger, bead, attempt)
-			return true, nil
+			return &BeadResult{Passed: true, ClaudeOutput: output.Result}, nil
 		}
 
 		// Verification failed: collect the error output.
@@ -86,18 +94,18 @@ func RetryBead(
 
 	diagnosis, err := RunDiagnostic(cfg, bead, collectedErrors, projectRoot)
 	if err != nil {
-		return false, fmt.Errorf("diagnostic failed for bead %s: %w", bead.ID, err)
+		return &BeadResult{Passed: false}, fmt.Errorf("diagnostic failed for bead %s: %w", bead.ID, err)
 	}
 
 	taskPrompt := BuildExecutorPrompt(bead, maxBlindRetries+1, &diagnosis, graphData, learnings)
 
 	output, err := SpawnClaude(cfg, systemPrompt, taskPrompt, projectRoot, opts)
 	if err != nil {
-		return false, fmt.Errorf("diagnostic spawn failed for bead %s: %w", bead.ID, err)
+		return &BeadResult{Passed: false}, fmt.Errorf("diagnostic spawn failed for bead %s: %w", bead.ID, err)
 	}
 
 	if output.IsError {
-		return false, nil
+		return &BeadResult{Passed: false, ClaudeOutput: output.Result}, nil
 	}
 
 	workDir := ""
@@ -106,16 +114,16 @@ func RetryBead(
 	}
 	result, err := RunVerification(cfg, bead, workDir)
 	if err != nil {
-		return false, fmt.Errorf("post-diagnostic verify failed for bead %s: %w", bead.ID, err)
+		return &BeadResult{Passed: false, ClaudeOutput: output.Result}, fmt.Errorf("post-diagnostic verify failed for bead %s: %w", bead.ID, err)
 	}
 
 	if result.Passed {
 		logVerifyPassed(logger, bead, maxBlindRetries+1)
-		return true, nil
+		return &BeadResult{Passed: true, ClaudeOutput: output.Result}, nil
 	}
 
 	logVerifyFailed(logger, bead, maxBlindRetries+1, result.FailedStep, result.Output)
-	return false, nil
+	return &BeadResult{Passed: false, ClaudeOutput: output.Result}, nil
 }
 
 // logRetry logs a task_retry event.

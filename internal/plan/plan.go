@@ -116,7 +116,7 @@ func spawnClaude(prompt string) (string, error) {
 	}
 
 	if envelope.IsError {
-		return "", fmt.Errorf("Claude returned an error: %s", envelope.Result)
+		return "", fmt.Errorf("claude returned an error: %s", envelope.Result)
 	}
 
 	return envelope.Result, nil
@@ -211,6 +211,44 @@ func padding(n int) string {
 		n = 0
 	}
 	return strings.Repeat(" ", n)
+}
+
+// RunPlanNonInteractive generates a plan without the interactive approval loop.
+// The TUI handles approval UI separately.
+// If feedback is provided, it's incorporated into the prompt for re-planning.
+func RunPlanNonInteractive(
+	cfg config.Config,
+	requirements *Requirements,
+	graphData, runDir string,
+	isGreenfield bool,
+	feedback string,
+) (*Plan, error) {
+	stackInfo := detect.StackInfo{
+		Language:       cfg.Project.Language,
+		Framework:      cfg.Project.Framework,
+		PackageManager: cfg.Project.PackageManager,
+	}
+
+	learnings := context.ReadLearnings(runDir)
+
+	prompt := BuildPlanPrompt(requirements, stackInfo, graphData, learnings, feedback, isGreenfield)
+
+	rawOutput, err := spawnClaude(prompt)
+	if err != nil {
+		return nil, fmt.Errorf("claude failed: %w", err)
+	}
+
+	plan, err := ParsePlan(rawOutput)
+	if err != nil {
+		return nil, fmt.Errorf("parse failed: %w", err)
+	}
+
+	// Write plan to disk for persistence
+	if err := writePlan(runDir, rawOutput); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to persist plan: %v\n", err)
+	}
+
+	return plan, nil
 }
 
 // writePlan persists the raw plan content to the run directory.

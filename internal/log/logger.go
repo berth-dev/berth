@@ -15,23 +15,24 @@ import (
 
 // Event type constants.
 const (
-	EventRunStarted         = "run_started"
-	EventUnderstandComplete = "understand_complete"
-	EventPlanApproved       = "plan_approved"
-	EventTaskStarted        = "task_started"
-	EventVerifyPassed       = "verify_passed"
-	EventVerifyFailed       = "verify_failed"
-	EventTaskRetry          = "task_retry"
-	EventTaskCompleted      = "task_completed"
-	EventRunComplete        = "run_complete"
-	EventWorkerStarted      = "worker_started"
-	EventWorkerCompleted    = "worker_completed"
-	EventMergeStarted       = "merge_started"
-	EventMergeCompleted     = "merge_completed"
-	EventMergeFailed        = "merge_failed"
-	EventReconcileStarted   = "reconcile_started"
-	EventReconcileCompleted = "reconcile_completed"
-	EventReconcileFailed    = "reconcile_failed"
+	EventRunStarted              = "run_started"
+	EventUnderstandComplete      = "understand_complete"
+	EventRequirementsApproval    = "requirements_approval"
+	EventPlanApproved            = "plan_approved"
+	EventTaskStarted             = "task_started"
+	EventVerifyPassed            = "verify_passed"
+	EventVerifyFailed            = "verify_failed"
+	EventTaskRetry               = "task_retry"
+	EventTaskCompleted           = "task_completed"
+	EventRunComplete             = "run_complete"
+	EventWorkerStarted           = "worker_started"
+	EventWorkerCompleted         = "worker_completed"
+	EventMergeStarted            = "merge_started"
+	EventMergeCompleted          = "merge_completed"
+	EventMergeFailed             = "merge_failed"
+	EventReconcileStarted        = "reconcile_started"
+	EventReconcileCompleted      = "reconcile_completed"
+	EventReconcileFailed         = "reconcile_failed"
 )
 
 // LogEvent represents a single structured event written to the log.
@@ -60,6 +61,7 @@ type LogEvent struct {
 	MergeFrom     string                 `json:"merge_from,omitempty"`
 	MergeTo       string                 `json:"merge_to,omitempty"`
 	ConflictFiles []string               `json:"conflict_files,omitempty"`
+	Choice        string                 `json:"choice,omitempty"`
 }
 
 // Logger writes append-only JSONL events to a log file.
@@ -86,7 +88,7 @@ func NewLogger(dir string) (*Logger, error) {
 // If event.Time is the zero value, it is automatically set to time.Now().UTC().
 // The file is opened in append mode, written to, and then closed.
 // Thread-safe via mutex.
-func (l *Logger) Append(event LogEvent) error {
+func (l *Logger) Append(event LogEvent) (retErr error) {
 	if event.Time.IsZero() {
 		event.Time = time.Now().UTC()
 	}
@@ -103,7 +105,11 @@ func (l *Logger) Append(event LogEvent) error {
 	if err != nil {
 		return fmt.Errorf("open log file: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && retErr == nil {
+			retErr = fmt.Errorf("close log file: %w", cerr)
+		}
+	}()
 
 	// Write the JSON line followed by a newline.
 	if _, err := f.Write(append(data, '\n')); err != nil {
@@ -115,7 +121,7 @@ func (l *Logger) Append(event LogEvent) error {
 
 // ReadAll reads and parses all events from the log file.
 // Returns an empty slice (not an error) if the file does not exist.
-func (l *Logger) ReadAll() ([]LogEvent, error) {
+func (l *Logger) ReadAll() (events []LogEvent, retErr error) {
 	f, err := os.Open(l.path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -123,9 +129,13 @@ func (l *Logger) ReadAll() ([]LogEvent, error) {
 		}
 		return nil, fmt.Errorf("open log file: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && retErr == nil {
+			retErr = fmt.Errorf("close log file: %w", cerr)
+		}
+	}()
 
-	var events []LogEvent
+	events = []LogEvent{}
 	scanner := bufio.NewScanner(f)
 	lineNum := 0
 	for scanner.Scan() {

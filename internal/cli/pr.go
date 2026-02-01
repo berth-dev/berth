@@ -33,7 +33,7 @@ func runPR(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get current branch: %w", err)
 	}
 	if branch == "main" || branch == "master" {
-		return fmt.Errorf("Cannot create PR from main branch")
+		return fmt.Errorf("cannot create PR from main branch")
 	}
 
 	// Check if PR already exists.
@@ -54,7 +54,7 @@ func runPR(cmd *cobra.Command, args []string) error {
 	if out, pushErr := pushCmd.CombinedOutput(); pushErr != nil {
 		output := strings.TrimSpace(string(out))
 		if strings.Contains(output, "No commits") || strings.Contains(output, "no commits") {
-			return fmt.Errorf("No commits on this branch.")
+			return fmt.Errorf("no commits on this branch")
 		}
 		return fmt.Errorf("failed to push branch: %s: %w", output, pushErr)
 	}
@@ -150,7 +150,7 @@ func handlePRError(err error) error {
 		return fmt.Errorf("GitHub CLI (gh) not found. Install it from: https://cli.github.com/")
 	}
 	if strings.Contains(msg, "not logged") || strings.Contains(msg, "auth") {
-		return fmt.Errorf("Not authenticated with GitHub. Run: gh auth login")
+		return fmt.Errorf("not authenticated with GitHub; run: gh auth login")
 	}
 	return fmt.Errorf("failed to create PR: %w", err)
 }

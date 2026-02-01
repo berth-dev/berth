@@ -2,8 +2,11 @@
 package execute
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/berth-dev/berth/internal/beads"
@@ -14,6 +17,24 @@ import (
 	"github.com/berth-dev/berth/internal/log"
 	"github.com/berth-dev/berth/prompts"
 )
+
+// OutputEvent represents a streaming event from parallel bead execution.
+type OutputEvent struct {
+	Type     string // "output", "complete", "error", "token_update"
+	BeadID   string
+	Content  string
+	Tokens   int
+	IsStderr bool
+}
+
+// ParallelResult contains the outcome of a single bead's parallel execution.
+type ParallelResult struct {
+	BeadID       string
+	Passed       bool
+	ClaudeOutput string
+	Error        error
+	WorktreePath string
+}
 
 // ShouldRunParallel determines whether to use parallel execution based on
 // config mode and bead topology.
@@ -82,7 +103,7 @@ func RunExecuteParallel(cfg config.Config, projectRoot string, runDir string, br
 	}
 	defer func() {
 		if kgClient != nil {
-			kgClient.Close()
+			_ = kgClient.Close()
 		}
 	}()
 
@@ -113,9 +134,9 @@ func RunExecuteParallel(cfg config.Config, projectRoot string, runDir string, br
 	if err != nil {
 		return fmt.Errorf("starting coordinator server: %w", err)
 	}
-	go coordServer.Start()
+	go func() { _ = coordServer.Start() }()
 	coordServer.StartLockReaper(5 * time.Minute)
-	defer coordServer.Stop()
+	defer func() { _ = coordServer.Stop() }()
 
 	fmt.Printf("Coordinator server running on %s\n", coordServer.Addr())
 
@@ -158,4 +179,221 @@ func RunExecuteParallel(cfg config.Config, projectRoot string, runDir string, br
 		pool.Completed, pool.Stuck, pool.Skipped, pool.Total)
 
 	return nil
+}
+
+// RunParallel executes all beads in an ExecutionGroup concurrently.
+// Each bead runs in its own worktree. Results are collected and returned.
+// The outputChan receives streaming events during execution if non-nil.
+func RunParallel(
+	ctx context.Context,
+	group ExecutionGroup,
+	projectRoot string,
+	cfg *config.Config,
+	kgClient *graph.Client,
+	systemPrompt string,
+	outputChan chan<- OutputEvent,
+) []ParallelResult {
+	if len(group.BeadIDs) == 0 {
+		return nil
+	}
+
+	// Fetch all beads once to look up by ID.
+	allBeads, err := beads.List()
+	if err != nil {
+		// Return error results for all beads if we can't list them.
+		results := make([]ParallelResult, len(group.BeadIDs))
+		for i, beadID := range group.BeadIDs {
+			results[i] = ParallelResult{
+				BeadID: beadID,
+				Passed: false,
+				Error:  fmt.Errorf("failed to list beads: %w", err),
+			}
+		}
+		return results
+	}
+
+	var wg sync.WaitGroup
+	resultsChan := make(chan ParallelResult, len(group.BeadIDs))
+
+	// Create a logger for this execution.
+	logger, logErr := log.NewLogger(projectRoot)
+	if logErr != nil {
+		logger = nil
+	}
+
+	for _, beadID := range group.BeadIDs {
+		beadID := beadID // capture for goroutine
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			// Check for context cancellation.
+			select {
+			case <-ctx.Done():
+				resultsChan <- ParallelResult{
+					BeadID: beadID,
+					Passed: false,
+					Error:  ctx.Err(),
+				}
+				return
+			default:
+			}
+
+			// Create worktree for this bead.
+			worktreePath, wtErr := git.CreateWorktreeForBead(projectRoot, beadID)
+			if wtErr != nil {
+				if outputChan != nil {
+					outputChan <- OutputEvent{
+						Type:    "error",
+						BeadID:  beadID,
+						Content: fmt.Sprintf("failed to create worktree: %v", wtErr),
+					}
+				}
+				resultsChan <- ParallelResult{
+					BeadID: beadID,
+					Passed: false,
+					Error:  fmt.Errorf("creating worktree: %w", wtErr),
+				}
+				return
+			}
+
+			// Find the bead in the list.
+			bead := GetBeadByID(allBeads, beadID)
+			if bead == nil {
+				if outputChan != nil {
+					outputChan <- OutputEvent{
+						Type:    "error",
+						BeadID:  beadID,
+						Content: "bead not found",
+					}
+				}
+				resultsChan <- ParallelResult{
+					BeadID:       beadID,
+					Passed:       false,
+					Error:        fmt.Errorf("bead %s not found", beadID),
+					WorktreePath: worktreePath,
+				}
+				return
+			}
+
+			// Load sidecar metadata.
+			if meta, metaErr := beads.ReadBeadMeta(projectRoot, beadID); metaErr == nil {
+				if len(bead.Files) == 0 && len(meta.Files) > 0 {
+					bead.Files = meta.Files
+				}
+				bead.VerifyExtra = meta.VerifyExtra
+			}
+
+			// Pre-embed graph data for this bead's files.
+			graphData := preEmbedGraphData(kgClient, bead.Files)
+
+			// Build spawn opts with worktree as WorkDir.
+			opts := &SpawnClaudeOpts{
+				WorkDir:      worktreePath,
+				SystemPrompt: systemPrompt,
+			}
+
+			// Send output event indicating start.
+			if outputChan != nil {
+				outputChan <- OutputEvent{
+					Type:    "output",
+					BeadID:  beadID,
+					Content: fmt.Sprintf("Starting bead execution in worktree: %s", worktreePath),
+				}
+			}
+
+			// Call RetryBead with worktree as WorkDir.
+			beadResult, retryErr := RetryBead(*cfg, bead, graphData, projectRoot, logger, kgClient, opts)
+
+			// Determine outcome.
+			passed := beadResult != nil && beadResult.Passed
+			var claudeOutput string
+			if beadResult != nil {
+				claudeOutput = beadResult.ClaudeOutput
+			}
+
+			// Send completion event.
+			if outputChan != nil {
+				eventType := "complete"
+				if !passed {
+					eventType = "error"
+				}
+				outputChan <- OutputEvent{
+					Type:    eventType,
+					BeadID:  beadID,
+					Content: claudeOutput,
+				}
+			}
+
+			resultsChan <- ParallelResult{
+				BeadID:       beadID,
+				Passed:       passed,
+				ClaudeOutput: claudeOutput,
+				Error:        retryErr,
+				WorktreePath: worktreePath,
+			}
+		}()
+	}
+
+	// Wait for all goroutines to complete.
+	wg.Wait()
+	close(resultsChan)
+
+	// Collect results.
+	results := make([]ParallelResult, 0, len(group.BeadIDs))
+	for result := range resultsChan {
+		results = append(results, result)
+	}
+
+	return results
+}
+
+// MergeParallelResults merges successful bead worktrees into the target branch.
+// Returns a slice of merge conflicts encountered during merging.
+func MergeParallelResults(
+	projectRoot string,
+	targetBranch string,
+	results []ParallelResult,
+) ([]git.MergeConflict, error) {
+	var conflicts []git.MergeConflict
+
+	// Switch to target branch first.
+	if err := git.SwitchBranch(targetBranch); err != nil {
+		return nil, fmt.Errorf("switching to target branch %s: %w", targetBranch, err)
+	}
+
+	for _, result := range results {
+		// Skip failed beads.
+		if !result.Passed {
+			continue
+		}
+
+		// Merge the worktree branch into target.
+		if err := git.MergeWorktreeForBead(projectRoot, result.BeadID, targetBranch); err != nil {
+			// Check if it's a merge conflict error.
+			var mergeConflict *git.MergeConflict
+			if errors.As(err, &mergeConflict) {
+				conflicts = append(conflicts, *mergeConflict)
+				// Abort the merge to clean up state before continuing.
+				_ = git.AbortMerge()
+				continue
+			}
+			// Other merge error - append as conflict with error info.
+			conflicts = append(conflicts, git.MergeConflict{
+				BeadID: result.BeadID,
+				Output: err.Error(),
+			})
+			_ = git.AbortMerge()
+			continue
+		}
+
+		// Remove worktree after successful merge.
+		if err := git.RemoveWorktreeForBead(projectRoot, result.BeadID); err != nil {
+			// Log warning but continue - worktree cleanup is best effort.
+			fmt.Fprintf(os.Stderr, "Warning: failed to remove worktree for bead %s: %v\n", result.BeadID, err)
+		}
+	}
+
+	return conflicts, nil
 }

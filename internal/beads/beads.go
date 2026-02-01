@@ -237,3 +237,30 @@ func Init() error {
 
 	return nil
 }
+
+// maxSummaryLength is the maximum character length for a close reason summary.
+const maxSummaryLength = 500
+
+// ExtractSummary extracts a meaningful summary from Claude's output for the
+// close reason. It attempts to find a summary in the output text, truncating
+// if necessary. Falls back to the bead title if no output is available.
+func ExtractSummary(claudeOutput string, beadTitle string) string {
+	// Fall back to title if no output.
+	if strings.TrimSpace(claudeOutput) == "" {
+		return "Completed: " + beadTitle
+	}
+
+	summary := strings.TrimSpace(claudeOutput)
+
+	// Truncate if too long, preserving word boundaries where possible.
+	if len(summary) > maxSummaryLength {
+		truncated := summary[:maxSummaryLength]
+		// Try to break at a word boundary (last space within limit).
+		if lastSpace := strings.LastIndex(truncated, " "); lastSpace > maxSummaryLength/2 {
+			truncated = truncated[:lastSpace]
+		}
+		summary = truncated + "..."
+	}
+
+	return summary
+}

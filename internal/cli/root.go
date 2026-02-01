@@ -7,6 +7,10 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/berth-dev/berth/internal/config"
+	"github.com/berth-dev/berth/internal/tui"
+	"github.com/berth-dev/berth/internal/tui/app"
 )
 
 var (
@@ -24,6 +28,29 @@ Claude processes, and verifies each step before moving on.`,
 	Version:       version,
 	SilenceErrors: true,
 	SilenceUsage:  true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// When no subcommand is provided, launch TUI if TTY, show help otherwise
+		if !tui.IsTTY() {
+			return cmd.Help()
+		}
+
+		// Get the current working directory as project root
+		projectRoot, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting current directory: %w", err)
+		}
+
+		// Try to read config, use defaults if not initialized
+		cfg, err := config.ReadConfig(projectRoot)
+		if err != nil {
+			// Config not found or invalid, use defaults
+			cfg = config.DefaultConfig()
+		}
+
+		// Create and run the TUI app
+		tuiApp := app.New(cfg, projectRoot)
+		return tui.Run(tuiApp)
+	},
 }
 
 // Execute runs the root command. Called from main.

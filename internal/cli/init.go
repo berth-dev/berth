@@ -302,9 +302,9 @@ func cleanBeadsArtifacts(dir string) {
 		// Only remove if it looks like a beads artifact.
 		if info, err := os.Stat(path); err == nil {
 			if name == ".claude" && info.IsDir() {
-				os.RemoveAll(path)
+				_ = os.RemoveAll(path)
 			} else if !info.IsDir() {
-				os.Remove(path)
+				_ = os.Remove(path)
 			}
 		}
 	}
@@ -373,7 +373,7 @@ func ensureGitignore(dir string) error {
 	if err != nil {
 		return fmt.Errorf("opening .gitignore: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := f.WriteString(toAppend.String()); err != nil {
 		return fmt.Errorf("writing .gitignore: %w", err)

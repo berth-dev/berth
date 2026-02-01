@@ -58,14 +58,20 @@ func RunVerification(cfg config.Config, bead *beads.Bead, workDir string) (*Veri
 }
 
 // buildPipeline combines the default verify pipeline with any per-bead
-// extra verification commands. The default pipeline runs first, followed
-// by bead-specific extras.
+// extra verification commands, and optionally the security scan command.
+// The default pipeline runs first, followed by bead-specific extras, and
+// finally the security scan (if configured).
 func buildPipeline(cfg config.Config, bead *beads.Bead) []string {
 	pipeline := make([]string, 0, len(cfg.VerifyPipeline))
 	pipeline = append(pipeline, cfg.VerifyPipeline...)
 
 	if len(bead.VerifyExtra) > 0 {
 		pipeline = append(pipeline, bead.VerifyExtra...)
+	}
+
+	// Add security scan if configured (runs last, after lint/test)
+	if cfg.Verify.Security != "" {
+		pipeline = append(pipeline, cfg.Verify.Security)
 	}
 
 	return pipeline

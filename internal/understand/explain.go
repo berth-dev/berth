@@ -2,13 +2,17 @@
 package understand
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/berth-dev/berth/internal/detect"
 )
+
+const claudeTimeout = 5 * time.Minute
 
 // claudeOutputJSON is the envelope Claude returns with --output-format json.
 type claudeOutputJSON struct {
@@ -82,7 +86,10 @@ func buildExplainPrompt(q Question, stackInfo detect.StackInfo, graphSummary str
 // spawnClaude runs `claude -p <prompt> --output-format json --dangerously-skip-permissions`
 // and returns the result text from the JSON output envelope.
 func spawnClaude(prompt string) (string, error) {
-	cmd := exec.Command(
+	ctx, cancel := context.WithTimeout(context.Background(), claudeTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx,
 		"claude",
 		"-p", prompt,
 		"--allowedTools", "Read,Grep,Glob",
@@ -92,6 +99,12 @@ func spawnClaude(prompt string) (string, error) {
 
 	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("claude timed out after %v", claudeTimeout)
+		}
+		if ctx.Err() == context.Canceled {
+			return "", fmt.Errorf("claude was canceled: parent process may have exited or been interrupted")
+		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return "", fmt.Errorf("claude exited %d: %s", exitErr.ExitCode(), string(exitErr.Stderr))
 		}

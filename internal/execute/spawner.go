@@ -16,10 +16,12 @@ import (
 // SpawnClaudeOpts holds optional overrides for Claude subprocess invocation.
 // Pass nil for default behavior (backward compatible).
 type SpawnClaudeOpts struct {
-	WorkDir       string // Override working directory (default: projectRoot)
-	MCPConfigPath string // Path to MCP config JSON for coordinator bridge
-	SystemPrompt  string // Override system prompt (default: prompts.ExecutorSystemPrompt)
-	Verbose       bool   // Stream Claude output to stdout/stderr in real-time
+	WorkDir       string            // Override working directory (default: projectRoot)
+	MCPConfigPath string            // Path to MCP config JSON for coordinator bridge
+	SystemPrompt  string            // Override system prompt (default: prompts.ExecutorSystemPrompt)
+	Verbose       bool              // Stream Claude output to stdout/stderr in real-time
+	OutputChan    chan<- StreamEvent // Channel to stream output events to TUI (optional)
+	BeadID        string            // Bead ID for tagging StreamEvents
 }
 
 // SpawnClaude invokes the Claude CLI as a subprocess with the given system
@@ -47,14 +49,26 @@ func SpawnClaude(cfg config.Config, systemPrompt, taskPrompt string, projectRoot
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
+	// Set up writers for stdout/stderr capture.
+	var stdoutWriter io.Writer = &stdout
+	var stderrWriter io.Writer = &stderr
+
 	// In verbose mode, stream output to terminal while also capturing it.
 	if opts != nil && opts.Verbose {
-		cmd.Stdout = io.MultiWriter(&stdout, os.Stdout)
-		cmd.Stderr = io.MultiWriter(&stderr, os.Stderr)
-	} else {
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
+		stdoutWriter = io.MultiWriter(&stdout, os.Stdout)
+		stderrWriter = io.MultiWriter(&stderr, os.Stderr)
 	}
+
+	// When OutputChan is set, tee output to both buffer and channel for TUI streaming.
+	if opts != nil && opts.OutputChan != nil {
+		stdoutWriter = io.MultiWriter(stdoutWriter,
+			NewChannelWriter(opts.OutputChan, opts.BeadID, false))
+		stderrWriter = io.MultiWriter(stderrWriter,
+			NewChannelWriter(opts.OutputChan, opts.BeadID, true))
+	}
+
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderrWriter
 
 	err := cmd.Run()
 	if err != nil {

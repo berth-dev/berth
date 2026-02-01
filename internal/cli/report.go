@@ -38,7 +38,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 	runsDir := filepath.Join(".berth", "runs")
 	entries, err := os.ReadDir(runsDir)
 	if err != nil || len(entries) == 0 {
-		return fmt.Errorf("No completed runs found. Start one with: berth run")
+		return fmt.Errorf("no completed runs found; start one with: berth run")
 	}
 
 	// Sort entries by name (timestamps sort lexicographically) and pick latest.
@@ -54,7 +54,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if latestRunDir == "" {
-		return fmt.Errorf("No completed runs found. Start one with: berth run")
+		return fmt.Errorf("no completed runs found; start one with: berth run")
 	}
 
 	// Try to read existing report file.

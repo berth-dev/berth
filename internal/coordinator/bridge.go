@@ -295,7 +295,7 @@ func RunBridge(addr, beadID string) error {
 			}
 
 			respBody, err := io.ReadAll(resp.Body)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if err != nil {
 				errResult := marshalMCPContent(fmt.Sprintf("reading coordinator response: %v", err), true)
 				writeResponse(jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: errResult})
@@ -331,7 +331,7 @@ func marshalMCPContent(text string, isError bool) json.RawMessage {
 func writeResponse(resp jsonRPCResponse) {
 	data, _ := json.Marshal(resp)
 	data = append(data, '\n')
-	os.Stdout.Write(data)
+	_, _ = os.Stdout.Write(data)
 }
 
 // injectBeadID adds bead_id to the JSON arguments if it isn't already present

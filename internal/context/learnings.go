@@ -47,7 +47,11 @@ func AppendLearning(dir string, learning string) error {
 	if err != nil {
 		return fmt.Errorf("opening learnings file: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("closing learnings file: %w", cerr)
+		}
+	}()
 
 	if _, err := fmt.Fprintf(f, "- %s\n", learning); err != nil {
 		return fmt.Errorf("writing learning: %w", err)

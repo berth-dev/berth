@@ -21,16 +21,6 @@ const (
 	stopTimeout    = 5 * time.Second
 )
 
-// sourceExtensions lists the file extensions treated as source code files.
-var sourceExtensions = map[string]bool{
-	".ts": true, ".tsx": true,
-	".js": true, ".jsx": true,
-	".go": true, ".py": true,
-	".rs": true, ".java": true,
-	".kt": true, ".rb": true,
-	".ex": true, ".exs": true,
-}
-
 // StartMCP starts the Knowledge Graph MCP Node.js process and returns
 // a connected Client.
 func StartMCP(projectRoot string, cfg config.KGConfig) (*Client, error) {
@@ -173,28 +163,3 @@ func removePIDFile(projectRoot string) error {
 }
 
 // processAlive is implemented in start_unix.go and start_windows.go.
-
-// countSourceFiles counts the number of source files under dir that match
-// known source code extensions. Used for the auto-enable heuristic.
-func countSourceFiles(dir string) int {
-	count := 0
-	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // Skip errors.
-		}
-		if info.IsDir() {
-			base := filepath.Base(path)
-			// Skip common non-source directories.
-			if base == "node_modules" || base == ".git" || base == "vendor" || base == "dist" || base == "build" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		ext := filepath.Ext(path)
-		if sourceExtensions[ext] {
-			count++
-		}
-		return nil
-	})
-	return count
-}

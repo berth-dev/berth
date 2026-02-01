@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/berth-dev/berth/internal/beads"
+	"github.com/berth-dev/berth/internal/tui"
 )
 
 // Plan represents a parsed execution plan consisting of multiple bead specifications.
@@ -275,6 +278,67 @@ func trimAll(ss []string) []string {
 		trimmed := strings.TrimSpace(s)
 		if trimmed != "" {
 			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+// ConvertToTUIPlan converts a plan.Plan to a tui.Plan for display in the TUI.
+func ConvertToTUIPlan(p *Plan) *tui.Plan {
+	tuiBeads := make([]tui.BeadSpec, len(p.Beads))
+	for i, spec := range p.Beads {
+		tuiBeads[i] = tui.BeadSpec{
+			ID:          spec.ID,
+			Title:       spec.Title,
+			Description: spec.Description,
+			Files:       spec.Files,
+			DependsOn:   spec.DependsOn,
+			VerifyExtra: spec.VerifyExtra,
+		}
+	}
+	return &tui.Plan{
+		Title:       p.Title,
+		Description: p.Description,
+		Beads:       tuiBeads,
+		RawOutput:   p.RawOutput,
+	}
+}
+
+// ConvertFromTUIPlan converts a tui.Plan back to a plan.Plan for use with
+// CreateBeads and other plan operations that require the plan package types.
+func ConvertFromTUIPlan(p *tui.Plan) *Plan {
+	planBeads := make([]BeadSpec, len(p.Beads))
+	for i, spec := range p.Beads {
+		planBeads[i] = BeadSpec{
+			ID:          spec.ID,
+			Title:       spec.Title,
+			Description: spec.Description,
+			Files:       spec.Files,
+			DependsOn:   spec.DependsOn,
+			VerifyExtra: spec.VerifyExtra,
+		}
+	}
+	return &Plan{
+		Title:       p.Title,
+		Description: p.Description,
+		Beads:       planBeads,
+		RawOutput:   p.RawOutput,
+	}
+}
+
+// ConvertToExecutionBeads converts plan.BeadSpecs to beads.Bead slice for use
+// with ComputeGroups and bead execution. Status is initialized to "open".
+func ConvertToExecutionBeads(specs []BeadSpec) []beads.Bead {
+	result := make([]beads.Bead, len(specs))
+	for i, spec := range specs {
+		result[i] = beads.Bead{
+			ID:          spec.ID,
+			Title:       spec.Title,
+			Description: spec.Description,
+			Status:      "open",
+			DependsOn:   spec.DependsOn,
+			Files:       spec.Files,
+			VerifyExtra: spec.VerifyExtra,
 		}
 	}
 	return result
