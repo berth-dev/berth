@@ -52,6 +52,7 @@ type ChatMessage struct {
 type Option struct {
 	Key         string
 	Label       string
+	Description string // Shown below option when focused
 	Recommended bool
 }
 
@@ -59,15 +60,18 @@ type Option struct {
 type Question struct {
 	ID          string
 	Text        string
+	ShortLabel  string   // For nav bar display (e.g., "Tech Stack")
 	Options     []Option
 	AllowCustom bool
 	AllowHelp   bool
+	MultiSelect bool // Allow multiple option selection
 }
 
 // Answer represents a user's response to a question.
 type Answer struct {
-	ID    string
-	Value string
+	ID     string
+	Value  string   // Single value for single-select
+	Values []string // Multiple values for multi-select
 }
 
 // BeadState represents the current state of a bead during execution.

@@ -232,6 +232,11 @@ type InterviewErrorMsg struct {
 	Err error
 }
 
+// SubmitAllAnswersMsg signals all interview answers should be submitted.
+type SubmitAllAnswersMsg struct {
+	Answers []Answer
+}
+
 // ============================================================================
 // Plan Messages
 // ============================================================================

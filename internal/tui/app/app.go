@@ -533,8 +533,18 @@ func (a *App) updateInterview(msg tea.Msg) (tea.Model, tea.Cmd) {
 	a.interviewView, cmd = a.interviewView.Update(msg)
 
 	switch msg := msg.(type) {
+	case tui.SubmitAllAnswersMsg:
+		// All answers submitted at once from the review screen
+		a.model.Answers = msg.Answers
+		a.model.State = tui.StateAnalyzing
+		a.model.AnalyzingStartTime = time.Now()
+		return a, tea.Batch(
+			a.model.Spinner.Tick,
+			commands.ProcessAnswersCmd(a.model.InterviewSession, msg.Answers),
+		)
+
 	case tui.AnswerMsg:
-		// Store answer and move to next question
+		// Legacy single answer handling (kept for compatibility)
 		a.model.Answers = append(a.model.Answers, tui.Answer{
 			ID:    msg.QuestionID,
 			Value: msg.Value,
@@ -544,7 +554,7 @@ func (a *App) updateInterview(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Check if more questions in current round
 		if a.model.CurrentQ < len(a.model.Questions) {
 			a.interviewView = views.NewInterviewModel(
-				a.model.Questions[a.model.CurrentQ],
+				a.model.Questions,
 				a.model.Width,
 				a.model.Height,
 			)
@@ -804,16 +814,15 @@ func (a *App) transitionToInterview(questions []tui.Question) {
 	a.model.State = tui.StateInterview
 	a.model.Questions = questions
 	a.model.CurrentQ = 0
-	a.model.Answers = nil              // Clear answers for new round
+	a.model.Answers = nil                    // Clear answers for new round
 	a.model.AnalyzingStartTime = time.Time{} // Reset timeout tracker
 
-	if len(questions) > 0 {
-		a.interviewView = views.NewInterviewModel(
-			questions[0],
-			a.model.Width,
-			a.model.Height,
-		)
-	}
+	// Pass ALL questions to the interview view (not just the first one)
+	a.interviewView = views.NewInterviewModel(
+		questions,
+		a.model.Width,
+		a.model.Height,
+	)
 }
 
 // TransitionToApproval sets up the plan approval phase.

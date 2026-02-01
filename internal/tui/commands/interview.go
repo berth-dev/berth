@@ -64,7 +64,10 @@ func ProcessAnswersCmd(session *understand.InterviewSession, answers []tui.Answe
 			return tui.InterviewErrorMsg{Err: fmt.Errorf("no answers provided")}
 		}
 		for i, a := range answers {
-			if strings.TrimSpace(a.Value) == "" {
+			// Check if answer has either a single value or multi-select values
+			hasValue := strings.TrimSpace(a.Value) != ""
+			hasValues := len(a.Values) > 0
+			if !hasValue && !hasValues {
 				return tui.InterviewErrorMsg{Err: fmt.Errorf("answer %d (ID: %s) is empty", i+1, a.ID)}
 			}
 			if strings.TrimSpace(a.ID) == "" {
@@ -98,9 +101,11 @@ func convertQuestions(questions []understand.Question) []tui.Question {
 		result[i] = tui.Question{
 			ID:          q.ID,
 			Text:        q.Text,
+			ShortLabel:  q.ShortLabel,
 			Options:     convertOptions(q.Options),
 			AllowCustom: q.AllowCustom,
 			AllowHelp:   q.AllowHelp,
+			MultiSelect: q.MultiSelect,
 		}
 	}
 	return result
@@ -113,6 +118,7 @@ func convertOptions(options []understand.Option) []tui.Option {
 		result[i] = tui.Option{
 			Key:         o.Key,
 			Label:       o.Label,
+			Description: o.Description,
 			Recommended: o.Recommended,
 		}
 	}
@@ -124,8 +130,9 @@ func convertToUnderstandAnswers(answers []tui.Answer) []understand.Answer {
 	result := make([]understand.Answer, len(answers))
 	for i, a := range answers {
 		result[i] = understand.Answer{
-			ID:    a.ID,
-			Value: a.Value,
+			ID:     a.ID,
+			Value:  a.Value,
+			Values: a.Values,
 		}
 	}
 	return result

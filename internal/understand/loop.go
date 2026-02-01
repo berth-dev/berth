@@ -25,15 +25,18 @@ const maxRounds = 10
 type Question struct {
 	ID          string   `json:"id"`
 	Text        string   `json:"text"`
+	ShortLabel  string   `json:"short_label,omitempty"` // For nav bar display
 	Options     []Option `json:"options"`
 	AllowCustom bool     `json:"allow_custom"`
 	AllowHelp   bool     `json:"allow_help"`
+	MultiSelect bool     `json:"multi_select,omitempty"` // Allow multiple selections
 }
 
 // Option is one selectable choice within a Question.
 type Option struct {
 	Key         string `json:"key"`
 	Label       string `json:"label"`
+	Description string `json:"description,omitempty"` // Shown below option when focused
 	Recommended bool   `json:"recommended,omitempty"`
 }
 
@@ -45,8 +48,9 @@ type Round struct {
 
 // Answer holds the user's response to a single Question.
 type Answer struct {
-	ID    string
-	Value string
+	ID     string
+	Value  string   // Single value for single-select
+	Values []string // Multiple values for multi-select
 }
 
 // UnderstandResponse is the JSON schema that Claude returns each round.
@@ -736,7 +740,7 @@ func cleanJSONOutput(s string) string {
 
 	// No code fence found. Try to find JSON object boundaries.
 	// Look for '{"' to avoid matching braces in prose like "{see below}".
-	start := strings.Index(s, `{"`)
+	start = strings.Index(s, `{"`)
 	if start == -1 {
 		// Fallback to any '{' if no '{"' found (e.g., empty object or array).
 		start = strings.Index(s, "{")
